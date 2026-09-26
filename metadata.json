@@ -1,0 +1,6 @@
+{
+  "name": "Qalam AI",
+  "description": "Transform raw text, notes, lectures, research, and audio into structured, publication-ready books.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

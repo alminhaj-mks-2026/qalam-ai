@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .font-urdu {
+    font-family: 'Noto Naskh Arabic', 'Noto Nastaliq Urdu', serif;
+  }
+  .font-nastaliq {
+    font-family: 'Noto Nastaliq Urdu', serif;
+    line-height: 2.2;
+  }
+  .font-arabic {
+    font-family: 'Amiri', 'Noto Naskh Arabic', serif;
+  }
+  .font-english {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+  .font-brand {
+    font-family: 'Cinzel', 'Amiri', serif;
+  }
+}
+
+/* Custom scrollbars & smooth transitions */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.03);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.15);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.5);
+}
+
+/* Book page shadow effect */
+.book-shadow {
+  box-shadow: 0 10px 30px -5px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(15, 23, 42, 0.05);
+}
+
+.book-spine-shadow {
+  background: linear-gradient(90deg, rgba(0,0,0,0.12) 0%, rgba(0,0,0,0.02) 4%, rgba(255,255,255,0.8) 8%, rgba(255,255,255,0) 100%);
+}
+
+.book-spine-shadow-rtl {
+  background: linear-gradient(-90deg, rgba(0,0,0,0.12) 0%, rgba(0,0,0,0.02) 4%, rgba(255,255,255,0.8) 8%, rgba(255,255,255,0) 100%);
+}
+
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  header, footer, section:not(#book-preview), .no-print {
+    display: none !important;
+  }
+  #book-preview {
+    padding: 0 !important;
+  }
+  .book-shadow {
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+  }
+}
