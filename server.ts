@@ -26,11 +26,12 @@ function getGeminiClient(): GoogleGenAI {
   });
 }
 
-// Helper to call Gemini API with limited exponential backoff for 503/UNAVAILABLE errors
+// Helper to call Gemini API with limited exponential backoff ONLY for true 503/UNAVAILABLE errors
+// CRITICAL: 429/RESOURCE_EXHAUSTED must NEVER be retried in a rapid loop, as it exacerbates rate limits
 async function callGeminiWithRetry<T>(
   fn: () => Promise<T>,
-  maxRetries = 3,
-  initialDelayMs = 1200
+  maxRetries = 2,
+  initialDelayMs = 1500
 ): Promise<T> {
   let lastError: any;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -40,18 +41,32 @@ async function callGeminiWithRetry<T>(
       lastError = err;
       const errMsg = String(err?.message || err || '').toLowerCase();
       const status = err?.status || err?.code || err?.response?.status;
-      const is503OrUnavailable =
+
+      // STRICT CHECK: Never retry on 429 / RESOURCE_EXHAUSTED
+      const is429Quota =
+        status === 429 ||
+        errMsg.includes('429') ||
+        errMsg.includes('resource_exhausted') ||
+        errMsg.includes('resourceexhausted') ||
+        errMsg.includes('quota exceeded');
+
+      if (is429Quota) {
+        console.warn(`[Gemini API] 429 RESOURCE_EXHAUSTED detected on attempt ${attempt}. Halting retries immediately to protect quota.`);
+        throw err;
+      }
+
+      // Only retry true transient 503 / UNAVAILABLE / Overloaded errors
+      const isTransient503 =
         status === 503 ||
         errMsg.includes('503') ||
         errMsg.includes('unavailable') ||
-        errMsg.includes('resourceexhausted') ||
         errMsg.includes('overloaded') ||
         errMsg.includes('high demand') ||
         errMsg.includes('temporarily unavailable');
 
-      if (is503OrUnavailable && attempt < maxRetries) {
+      if (isTransient503 && attempt < maxRetries) {
         const delay = initialDelayMs * Math.pow(2, attempt - 1);
-        console.warn(`[Gemini API] Retry attempt ${attempt}/${maxRetries} after 503/UNAVAILABLE. Waiting ${delay}ms...`);
+        console.warn(`[Gemini API] Transient 503/Overloaded. Retry attempt ${attempt}/${maxRetries} after ${delay}ms...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
       } else {
         throw err;
@@ -61,8 +76,88 @@ async function callGeminiWithRetry<T>(
   throw lastError;
 }
 
+// Helper to extract structured quota details from Gemini API error
+function parseGeminiError(error: any, modelUsed: string) {
+  const errMsg = String(error?.message || error || '');
+  const status = error?.status || error?.code || error?.response?.status;
+
+  const is429 =
+    status === 429 ||
+    errMsg.includes('429') ||
+    errMsg.includes('RESOURCE_EXHAUSTED') ||
+    errMsg.includes('resourceexhausted') ||
+    errMsg.includes('quota exceeded') ||
+    errMsg.includes('free_tier_requests');
+
+  if (is429) {
+    // Try to extract retry delay seconds if available (e.g. "retryDelay":"26s" or "retry in 26.5s")
+    let retryAfterSeconds = 30;
+    const retryDelayMatch = errMsg.match(/retryDelay["\s:]+["']?(\d+)/i) ||
+      errMsg.match(/retry in\s+(\d+(?:\.\d+)?)\s*s/i) ||
+      errMsg.match(/(\d+)\s*s/i);
+
+    if (retryDelayMatch && retryDelayMatch[1]) {
+      const parsed = Math.ceil(parseFloat(retryDelayMatch[1]));
+      if (!isNaN(parsed) && parsed > 0 && parsed <= 300) {
+        retryAfterSeconds = parsed;
+      }
+    }
+
+    // Determine if it is a Free Tier daily limit violation
+    const isDailyLimit = errMsg.includes('GenerateRequestsPerDay') || errMsg.includes('free_tier_requests');
+
+    let urduMessage = `Gemini AI (${modelUsed}) کے مفت کوٹہ کی حد (429 Quota Exceeded) اس وقت پہنچ چکی ہے۔`;
+    if (isDailyLimit) {
+      urduMessage = `Gemini AI (${modelUsed}) کا مفت روزانہ کوٹہ (20 درخواستیں فی یوم) مکمل ہو چکا ہے۔ برائے مہربانی چند لمحوں بعد "دوبارہ کوشش کریں" پر کلک کریں یا متبادل ماڈل منتخب کریں۔`;
+    } else {
+      urduMessage = `Gemini AI کی درخواستوں کی شرح (Rate Limit) مکمل ہو گئی ہے۔ برائے مہربانی ${retryAfterSeconds} سیکنڈ بعد دوبارہ کوشش فرمائیں۔`;
+    }
+
+    return {
+      statusCode: 429,
+      errorCode: 'RESOURCE_EXHAUSTED',
+      isQuotaExhausted: true,
+      model: modelUsed,
+      retryAfterSeconds,
+      isDailyLimit,
+      error: urduMessage,
+      technicalDetails: errMsg.slice(0, 300),
+    };
+  }
+
+  const is503 =
+    status === 503 ||
+    errMsg.includes('503') ||
+    errMsg.includes('UNAVAILABLE') ||
+    errMsg.includes('Overloaded') ||
+    errMsg.includes('temporarily unavailable');
+
+  if (is503) {
+    return {
+      statusCode: 503,
+      errorCode: 'SERVICE_UNAVAILABLE',
+      isQuotaExhausted: false,
+      model: modelUsed,
+      retryAfterSeconds: 5,
+      error: 'Gemini AI سرور اس وقت عارضی طور پر مصروف (503 Unavailable) ہے۔ برائے مہربانی چند لمحوں بعد "دوبارہ کوشش کریں" پر کلک کریں۔',
+      technicalDetails: errMsg.slice(0, 200),
+    };
+  }
+
+  return {
+    statusCode: 500,
+    errorCode: 'INTERNAL_ERROR',
+    isQuotaExhausted: false,
+    model: modelUsed,
+    retryAfterSeconds: 3,
+    error: error.message || 'Gemini AI کے ساتھ رابطہ قائم نہیں ہو سکا۔ برائے مہربانی دوبارہ کوشش فرمائیں۔',
+    technicalDetails: errMsg.slice(0, 200),
+  };
+}
+
 // POST /api/generate-book - Real Gemini Book Generation Endpoint
 app.post('/api/generate-book', async (req, res) => {
+  const requestedModel = req.body.model === 'gemini-3.1-flash-lite' ? 'gemini-3.1-flash-lite' : 'gemini-3.8-flash';
   try {
     const { content, title, authorName, genre, language } = req.body;
 
@@ -127,7 +222,7 @@ ${content}
 
     const response = await callGeminiWithRetry(() =>
       ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: requestedModel,
         contents: prompt,
         config: {
           systemInstruction,
@@ -204,30 +299,22 @@ ${content}
 
     return res.json({
       success: true,
+      modelUsed: requestedModel,
       book: parsedBook,
     });
   } catch (error: any) {
     console.error('Error in /api/generate-book:', error);
-    const errMsg = String(error?.message || error || '');
-    const is503 =
-      errMsg.includes('503') ||
-      errMsg.includes('UNAVAILABLE') ||
-      errMsg.includes('Overloaded') ||
-      errMsg.includes('temporarily unavailable');
-
-    const statusCode = is503 ? 503 : 500;
-    const userFacingError = is503
-      ? 'Gemini AI سرور اس وقت عارضی طور پر مصروف (503 Unavailable) ہے۔ برائے مہربانی چند لمحوں بعد "کتاب تیار کریں" پر دوبارہ کلک کریں۔'
-      : (error.message || 'Gemini AI کے ساتھ رابطہ قائم نہیں ہو سکا۔');
-
-    return res.status(statusCode).json({
-      error: userFacingError,
+    const parsedError = parseGeminiError(error, requestedModel);
+    return res.status(parsedError.statusCode).json({
+      success: false,
+      ...parsedError,
     });
   }
 });
 
 // POST /api/suggest-title - Real Gemini Title Suggestion Endpoint
 app.post('/api/suggest-title', async (req, res) => {
+  const requestedModel = req.body.model === 'gemini-3.1-flash-lite' ? 'gemini-3.1-flash-lite' : 'gemini-3.8-flash';
   try {
     const { content, genre, language } = req.body;
 
@@ -255,7 +342,7 @@ ${content.slice(0, 4000)}
 """`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: requestedModel,
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -270,11 +357,13 @@ ${content.slice(0, 4000)}
       .trim();
 
     const suggestions = JSON.parse(cleanedJson);
-    return res.json({ success: true, suggestions });
+    return res.json({ success: true, suggestions, modelUsed: requestedModel });
   } catch (error: any) {
     console.error('Error in /api/suggest-title:', error);
-    return res.status(500).json({
-      error: error.message || 'Failed to suggest titles using Gemini AI.',
+    const parsedError = parseGeminiError(error, requestedModel);
+    return res.status(parsedError.statusCode).json({
+      success: false,
+      ...parsedError,
     });
   }
 });

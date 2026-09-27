@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { TranslationDictionary } from '../i18n/translations';
 import { PreviewPage, ChapterOutline, BookGenre, CoverPageConfig, CoverLayout } from '../types';
+import { QuotaErrorInfo } from './Workspace';
 import {
   BookOpen,
   ChevronRight,
@@ -24,7 +25,11 @@ import {
   AlignCenter,
   AlignRight,
   Layers,
-  Upload
+  Upload,
+  AlertCircle,
+  RefreshCw,
+  Clock,
+  Zap
 } from 'lucide-react';
 
 interface BookPreviewProps {
@@ -52,6 +57,10 @@ interface BookPreviewProps {
   setCoverConfig: React.Dispatch<React.SetStateAction<CoverPageConfig>>;
   isOpenModal?: boolean;
   onCloseModal?: () => void;
+  generationError?: string | null;
+  quotaErrorInfo?: QuotaErrorInfo | null;
+  isGeneratingBook?: boolean;
+  onRetry?: (modelOverride?: 'gemini-3.8-flash' | 'gemini-3.1-flash-lite') => void;
 }
 
 export const BookPreview: React.FC<BookPreviewProps> = ({
@@ -79,6 +88,10 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
   setCoverConfig,
   isOpenModal = false,
   onCloseModal,
+  generationError,
+  quotaErrorInfo,
+  isGeneratingBook,
+  onRetry,
 }) => {
   const [currentPage, setCurrentPage] = useState<PreviewPage>('cover');
   const [zoomLevel, setZoomLevel] = useState<number>(100);
@@ -1066,6 +1079,53 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
         <div className="mb-3">
           {renderToolbar()}
         </div>
+
+        {/* In-Preview Quota / Error Banner with Retry (Keeps Preview Open!) */}
+        {generationError && (
+          <div className="mb-3 p-3 sm:p-4 bg-amber-950/95 border border-[#D4AF37] rounded-xl text-amber-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-urdu shadow-2xl animate-fade-in">
+            <div className="flex items-center gap-2.5 text-right rtl:text-right ltr:text-left overflow-hidden">
+              <div className="w-8 h-8 rounded-lg bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-4 h-4 text-[#D4AF37]" />
+              </div>
+              <div>
+                <span className="font-bold text-[#D4AF37] block">
+                  {quotaErrorInfo?.isQuotaExhausted ? '⚠️ Gemini کوٹہ کی حد (429 RESOURCE_EXHAUSTED)' : '⚠️ الرٹ'}
+                </span>
+                <span className="text-[11px] text-slate-200 block">
+                  {generationError}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+              {quotaErrorInfo?.retryAfterSeconds && quotaErrorInfo.retryAfterSeconds > 0 ? (
+                <span className="text-[11px] font-mono text-[#D4AF37] bg-slate-900 px-2 py-1 rounded border border-[#D4AF37]/30">
+                  {quotaErrorInfo.retryAfterSeconds}s
+                </span>
+              ) : null}
+
+              <button
+                onClick={() => onRetry ? onRetry('gemini-3.8-flash') : undefined}
+                disabled={isGeneratingBook}
+                className="px-4 py-2 bg-[#D4AF37] hover:bg-[#c49f2e] text-[#0F172A] font-bold rounded-lg cursor-pointer text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingBook ? 'animate-spin' : ''}`} />
+                <span>دوبارہ کوشش کریں (Retry)</span>
+              </button>
+
+              {quotaErrorInfo?.isQuotaExhausted && onRetry && (
+                <button
+                  onClick={() => onRetry('gemini-3.1-flash-lite')}
+                  disabled={isGeneratingBook}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-[#D4AF37] border border-[#D4AF37]/40 font-bold rounded-lg cursor-pointer text-xs flex items-center gap-1 shadow-sm transition-all active:scale-95 disabled:opacity-50"
+                >
+                  <Zap className="w-3.5 h-3.5 text-[#D4AF37]" />
+                  <span>فوری متبادل</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Page Spread Display Area */}
         <div className="flex-1 overflow-y-auto flex justify-center items-center py-2 px-1">

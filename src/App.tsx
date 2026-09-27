@@ -8,7 +8,8 @@ import { Workspace } from './components/Workspace';
 import { BookPreview } from './components/BookPreview';
 import { BookEditor } from './components/BookEditor';
 import { Footer } from './components/Footer';
-import { generateBookWithGemini } from './services/aiService';
+import { generateBookWithGemini, AiServiceError } from './services/aiService';
+import { QuotaErrorInfo } from './components/Workspace';
 import { createBookPdfBlob, triggerPdfDownload, shareBookPdf } from './services/pdfService';
 import { BookOpen, Edit3, FileDown, Share2, Loader2, Sparkles } from 'lucide-react';
 
@@ -97,7 +98,23 @@ export default function App() {
   const [isGeneratingBook, setIsGeneratingBook] = useState<boolean>(false);
   const [generationStatusText, setGenerationStatusText] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [quotaErrorInfo, setQuotaErrorInfo] = useState<QuotaErrorInfo | null>(null);
   const [generatedBook, setGeneratedBook] = useState<GeneratedBookData | null>(null);
+
+  // Countdown timer for 429 quota retry readiness
+  useEffect(() => {
+    if (!quotaErrorInfo || quotaErrorInfo.retryAfterSeconds <= 0) return;
+    const timer = setInterval(() => {
+      setQuotaErrorInfo((prev) => {
+        if (!prev) return null;
+        if (prev.retryAfterSeconds <= 1) {
+          return { ...prev, retryAfterSeconds: 0 };
+        }
+        return { ...prev, retryAfterSeconds: prev.retryAfterSeconds - 1 };
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [quotaErrorInfo?.retryAfterSeconds]);
 
   // PDF Export & Share States
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
@@ -123,8 +140,9 @@ export default function App() {
   /**
    * Main handler for "کتاب تیار کریں"
    * Strict single click = single generation flow guard to prevent duplicate requests.
+   * Model defaults to 'gemini-3.8-flash' as requested.
    */
-  const handleGenerateBook = async () => {
+  const handleGenerateBook = async (modelOverride?: 'gemini-3.8-flash' | 'gemini-3.1-flash-lite') => {
     if (isGeneratingBook) return; // Prevent duplicate requests
 
     let combinedContent = rawText.trim();
@@ -147,18 +165,24 @@ export default function App() {
       return;
     }
 
+    const chosenModel = modelOverride || 'gemini-3.8-flash';
+
     setIsGeneratingBook(true);
     setGenerationError(null);
-    setGenerationStatusText('Gemini AI مواد کا تجزیہ کر کے کتاب کے ابواب اور صفحات ترتیب دے رہا ہے...');
+    setQuotaErrorInfo(null);
+    setGenerationStatusText(`Gemini AI (${chosenModel}) مواد کا تجزیہ کر کے کتاب کے ابواب اور صفحات ترتیب دے رہا ہے...`);
 
     try {
-      const bookData = await generateBookWithGemini({
+      const result = await generateBookWithGemini({
         content: combinedContent,
         title: title.trim() || undefined,
         authorName: authorName.trim() || undefined,
         genre,
         language,
+        model: chosenModel,
       });
+
+      const bookData = result.book;
 
       // Update app state with real generated book data
       setGeneratedBook(bookData);
@@ -172,14 +196,29 @@ export default function App() {
 
       setGenerationStatusText('کتاب کامیابی سے تیار ہو گئی ہے!');
       
-      // Automatically launch Full Screen Premium Book View
+      // Automatically launch Full Screen Premium Book View on success
       setIsFullBookViewOpen(true);
     } catch (err: any) {
       console.error('Gemini Book Generation Error:', err);
+      const isQuota = !!err?.isQuotaExhausted || err?.statusCode === 429;
+      
+      setQuotaErrorInfo({
+        isQuotaExhausted: isQuota,
+        message: err?.message || 'کتاب کی تیاری کے دوران خرابی پیش آئی۔',
+        retryAfterSeconds: err?.retryAfterSeconds || 30,
+        model: err?.model || chosenModel,
+        isDailyLimit: err?.isDailyLimit,
+      });
+
       setGenerationError(err.message || 'کتاب کی تیاری کے دوران خرابی پیش آئی۔');
+      // CRITICAL: NEVER close the preview modal on error! Keep existing view alive.
     } finally {
       setIsGeneratingBook(false);
     }
+  };
+
+  const handleRetryGeneration = (modelOverride?: 'gemini-3.8-flash' | 'gemini-3.1-flash-lite') => {
+    handleGenerateBook(modelOverride);
   };
 
   /**
@@ -298,10 +337,12 @@ export default function App() {
         setGenre={setGenre}
         attachedFiles={attachedFiles}
         setAttachedFiles={setAttachedFiles}
-        onGenerateBook={handleGenerateBook}
+        onGenerateBook={() => handleGenerateBook()}
         isGeneratingBook={isGeneratingBook}
         generationError={generationError}
         generationStatusText={generationStatusText}
+        quotaErrorInfo={quotaErrorInfo}
+        onRetry={handleRetryGeneration}
       />
 
       {/* 5. CLEAN DASHBOARD ACTION CARD (PRIMARY BUTTON: 📖 تیار کتاب دیکھیں) */}
@@ -432,6 +473,10 @@ export default function App() {
           setCoverConfig={setCoverConfig}
           isOpenModal={true}
           onCloseModal={() => setIsFullBookViewOpen(false)}
+          generationError={generationError}
+          quotaErrorInfo={quotaErrorInfo}
+          isGeneratingBook={isGeneratingBook}
+          onRetry={handleRetryGeneration}
         />
       )}
 
