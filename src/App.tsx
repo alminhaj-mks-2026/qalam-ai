@@ -1,18 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Language, InputMode, BookGenre, AttachedFile, ChapterOutline, GeneratedBookData } from './types';
+import { Language, InputMode, BookGenre, AttachedFile, ChapterOutline, GeneratedBookData, CoverPageConfig } from './types';
 import { translations } from './i18n/translations';
 import { Header } from './components/Header';
 import { Hero } from './components/Hero';
 import { HowItWorks } from './components/HowItWorks';
 import { Workspace } from './components/Workspace';
-import { BookTitleSection } from './components/BookTitleSection';
-import { BookStructureSection } from './components/BookStructureSection';
 import { BookPreview } from './components/BookPreview';
-import { FinalActionArea } from './components/FinalActionArea';
-import { PhaseInfoModal } from './components/PhaseInfoModal';
+import { BookEditor } from './components/BookEditor';
 import { Footer } from './components/Footer';
 import { generateBookWithGemini } from './services/aiService';
 import { createBookPdfBlob, triggerPdfDownload, shareBookPdf } from './services/pdfService';
+import { BookOpen, Edit3, FileDown, Share2, Loader2, Sparkles } from 'lucide-react';
 
 export default function App() {
   const [language, setLanguage] = useState<Language>('ur');
@@ -27,23 +25,73 @@ export default function App() {
   const [prefaceNote, setPrefaceNote] = useState<string>('اس کتاب کا بنیادی مقصد خام خیالات اور تحریروں کو ایک مربوط، جاذب اور مفید کتاب میں ڈھالنا ہے۔');
   const [conclusionNote, setConclusionNote] = useState<string>('حاصلِ کلام یہ ہے کہ منظم نگارش اور تدوین سے ہی علم آئندہ نسلوں کے لیے محفوظ اور مؤثر بنتا ہے۔');
 
+  const [bodyFontSize, setBodyFontSize] = useState<number>(16);
+  const [pageSize, setPageSize] = useState<'A4' | 'A5' | 'Letter' | 'B5'>('A4');
+  const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
+  const [autoLayout, setAutoLayout] = useState<boolean>(true);
+
+  // Customizable Professional Cover Page State
+  const [coverConfig, setCoverConfig] = useState<CoverPageConfig>({
+    title: 'حکمتِ قلم اور جدید سائنس',
+    subtitle: 'علم سے حقیقی مہارت تک کا سفر',
+    authorName: 'عبد الحفیظ',
+    additionalText: 'AL-MINHAJ MKS / Qalam AI Edition',
+    logoUrl: '',
+    layout: 'royal_islamic',
+    alignment: 'center',
+    themeColor: '#D4AF37',
+    backgroundColor: '#0F172A',
+    showFrameBorder: true,
+    isRtl: true,
+  });
+
+  // Keep Cover Page synced when title, subtitle, or authorName changes
+  useEffect(() => {
+    setCoverConfig((prev) => ({
+      ...prev,
+      title: title || prev.title,
+      subtitle: subtitle || prev.subtitle,
+      authorName: authorName || prev.authorName,
+    }));
+  }, [title, subtitle, authorName]);
+
+  // Default initial book structure
   const [chapters, setChapters] = useState<ChapterOutline[]>([
     {
       id: 'chap-1',
       title: 'باب ۱: فکری بنیادیں اور ابتدائی اصول',
+      summary: 'اس باب میں علم کی ساخت اور فکری اصولوں پر تفصیلی بحث کی گئی ہے۔',
       subheadings: ['علم کا تصور اور اہمیت', 'خام مواد کی جمع آوری', 'منطق و اسلوبِ بیان'],
+      sections: [
+        { heading: 'علم کا تصور اور اہمیت', content: 'علم و دانائی انسانی تاریخ کا عظیم ترین اثاثہ ہے۔ جب تک خام خیالات کو ایک منظم اور مربوط تحریر میں نہیں ڈھالا جاتا، اس وقت تک علم کا حقیقی نفع قاری تک نہیں پہنچتا۔' },
+        { heading: 'خام مواد کی جمع آوری', content: 'تحریر نگاری کا پہلا مرحلہ تمام بنیادی حوالوں، نوٹوں اور ریکارڈنگز کو ایک جگہ جمع کرنا ہے۔' },
+      ],
     },
     {
       id: 'chap-2',
       title: 'باب ۲: ساخت و تدوین کا عمل',
+      summary: 'اس باب میں ابواب کی تقسیم اور تحریر کو کتاب کی شکل دینے کا انداز بیان ہوا ہے۔',
       subheadings: ['ابواب کی تقسیمِ کار', 'ذیلی عنوانات اور ترتیب', 'روانی اور جامعیت'],
+      sections: [
+        { heading: 'ابواب کی تقسیمِ کار', content: 'ہر کتاب کا ایک مرکزی خیال ہوتا ہے جس کے گرد تمام ابواب گردش کرتے ہیں۔' },
+        { heading: 'ذیلی عنوانات اور ترتیب', content: 'ذیلی عنوانات قاری کو تحریر کی روانی اور فکری ربط سمجھنے میں مدد دیتے ہیں۔' },
+      ],
     },
     {
       id: 'chap-3',
       title: 'باب ۳: حتمی تنقیح اور اشاعت',
+      summary: 'پریویو، صفحہ بندی اور پی ڈی ایف فارمیٹنگ کے زریں اصول۔',
       subheadings: ['پریویو اور صفحہ بندی', 'پی ڈی ایف ڈیزائن', 'قاری کے لیے افادیت'],
+      sections: [
+        { heading: 'پریویو اور صفحہ بندی', content: 'صفحہ بندی میں خوبصورت فونٹس، حاشیے اور مناسب فاصلہ کتاب کی معنویت کو دوچند کرتا ہے۔' },
+        { heading: 'قاری کے لیے افادیت', content: 'کتاب کا حقیقی مقصد قاری کی زندگی میں مثبت فکری یا عملی تبدیلی لانا ہے۔' },
+      ],
     },
   ]);
+
+  // Full Screen Book View Modal State
+  const [isFullBookViewOpen, setIsFullBookViewOpen] = useState<boolean>(false);
+  const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
 
   // Real Gemini AI Generation States
   const [isGeneratingBook, setIsGeneratingBook] = useState<boolean>(false);
@@ -55,8 +103,6 @@ export default function App() {
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
   const [isSharingPdf, setIsSharingPdf] = useState<boolean>(false);
   const [pdfStatusMessage, setPdfStatusMessage] = useState<string | null>(null);
-
-  const [modalAction, setModalAction] = useState<'build' | 'pdf' | 'share' | null>(null);
 
   // Synchronize document direction and lang attributes when language changes
   useEffect(() => {
@@ -76,10 +122,11 @@ export default function App() {
 
   /**
    * Main handler for "کتاب تیار کریں"
-   * Collects user rawText + attached file text contents, validates input, calls real Gemini API,
-   * validates output, updates book state, and scrolls to live book view.
+   * Strict single click = single generation flow guard to prevent duplicate requests.
    */
   const handleGenerateBook = async () => {
+    if (isGeneratingBook) return; // Prevent duplicate requests
+
     let combinedContent = rawText.trim();
 
     // Include text from attached files if present
@@ -94,7 +141,7 @@ export default function App() {
 
     // Input Validation
     if (!combinedContent) {
-      setGenerationError('براہِ کرم پہلے اپنا تحریری مواد داخل کریں یا فائل اپ لوڈ کریں۔');
+      setGenerationError('براہِ کرم پہلے اپنا تحریری مواد داخل کریں، فائل اپ لوڈ کریں یا وائس نوٹ فراہم کریں۔');
       const workspaceEl = document.getElementById('workspace');
       if (workspaceEl) workspaceEl.scrollIntoView({ behavior: 'smooth' });
       return;
@@ -102,7 +149,7 @@ export default function App() {
 
     setIsGeneratingBook(true);
     setGenerationError(null);
-    setGenerationStatusText('Gemini AI مواد کا تجزیہ کر کے کتاب کے ابواب ترتیب دے رہا ہے...');
+    setGenerationStatusText('Gemini AI مواد کا تجزیہ کر کے کتاب کے ابواب اور صفحات ترتیب دے رہا ہے...');
 
     try {
       const bookData = await generateBookWithGemini({
@@ -124,14 +171,9 @@ export default function App() {
       if (bookData.chapters && bookData.chapters.length > 0) setChapters(bookData.chapters);
 
       setGenerationStatusText('کتاب کامیابی سے تیار ہو گئی ہے!');
-
-      // Smooth scroll to book preview
-      setTimeout(() => {
-        const previewEl = document.getElementById('book-preview');
-        if (previewEl) {
-          previewEl.scrollIntoView({ behavior: 'smooth' });
-        }
-      }, 350);
+      
+      // Automatically launch Full Screen Premium Book View
+      setIsFullBookViewOpen(true);
     } catch (err: any) {
       console.error('Gemini Book Generation Error:', err);
       setGenerationError(err.message || 'کتاب کی تیاری کے دوران خرابی پیش آئی۔');
@@ -140,12 +182,10 @@ export default function App() {
     }
   };
 
-  const handleExportPdf = async (e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-
+  /**
+   * PDF Direct Download — Reuses cached PDF Blob instantly
+   */
+  const handleExportPdf = async () => {
     if (isExportingPdf || isSharingPdf) return;
 
     setIsExportingPdf(true);
@@ -162,6 +202,11 @@ export default function App() {
         chapters,
         rawText,
         generatedBook,
+        bodyFontSize,
+        pageSize,
+        orientation,
+        autoLayout,
+        coverConfig,
       });
 
       triggerPdfDownload(blob, filename);
@@ -176,16 +221,15 @@ export default function App() {
     }
   };
 
-  const handleShareBook = async (e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-
+  /**
+   * PDF File Share — Web Share API Level 2 (Shares actual PDF File to WhatsApp/Apps)
+   * Reuses cached PDF Blob without regeneration.
+   */
+  const handleShareBook = async () => {
     if (isExportingPdf || isSharingPdf) return;
 
     setIsSharingPdf(true);
-    setPdfStatusMessage('پی ڈی ایف فائل اور شیئرنگ شیٹ تیار کی جا رہی ہے...');
+    setPdfStatusMessage('پی ڈی ایف فائل تیار کر کے شیئر کی جا رہی ہے...');
 
     try {
       const { blob, filename } = await createBookPdfBlob({
@@ -198,6 +242,11 @@ export default function App() {
         chapters,
         rawText,
         generatedBook,
+        bodyFontSize,
+        pageSize,
+        orientation,
+        autoLayout,
+        coverConfig,
       });
 
       const res = await shareBookPdf(blob, filename, title);
@@ -217,8 +266,8 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen bg-[#FBF9F5] text-slate-900 font-urdu selection:bg-[#D4AF37]/20`}>
-      {/* 1. HEADER */}
+    <div className="min-h-screen bg-[#FBF9F5] text-slate-900 font-urdu selection:bg-[#D4AF37]/20">
+      {/* 1. HEADER (Single Language Selector) */}
       <Header
         language={language}
         onLanguageChange={setLanguage}
@@ -231,16 +280,18 @@ export default function App() {
         onStartClick={handleScrollToWorkspace}
       />
 
-      {/* 3. HOW IT WORKS */}
+      {/* 3. HOW IT WORKS (Clean 2x2 Grid) */}
       <HowItWorks t={t} />
 
-      {/* 4. BOOK CREATION WORKSPACE */}
+      {/* 4. WORKSPACE & GENERATE BOOK */}
       <Workspace
         t={t}
         inputMode={inputMode}
         setInputMode={setInputMode}
         rawText={rawText}
         setRawText={setRawText}
+        title={title}
+        setTitle={setTitle}
         authorName={authorName}
         setAuthorName={setAuthorName}
         genre={genre}
@@ -253,73 +304,139 @@ export default function App() {
         generationStatusText={generationStatusText}
       />
 
-      {/* 5. BOOK TITLE SECTION */}
-      <BookTitleSection
-        t={t}
-        title={title}
-        setTitle={setTitle}
-        subtitle={subtitle}
-        setSubtitle={setSubtitle}
-        genre={genre}
-        rawText={rawText}
-        language={language}
-      />
+      {/* 5. CLEAN DASHBOARD ACTION CARD (PRIMARY BUTTON: 📖 تیار کتاب دیکھیں) */}
+      <div id="book-section-anchor" className="py-8 px-4 sm:px-6 bg-[#FBF9F5]">
+        <div className="max-w-4xl mx-auto bg-[#0F172A] text-slate-100 p-6 sm:p-8 rounded-2xl border border-[#D4AF37]/40 shadow-xl space-y-6 text-center">
+          
+          <div className="space-y-2">
+            <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 text-[#D4AF37] text-xs font-medium border border-[#D4AF37]/30">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>پبلشنگ ہاؤس ڈیجیٹل ڈیش بورڈ</span>
+            </span>
 
-      {/* 6. BOOK STRUCTURE SECTION */}
-      <BookStructureSection
-        t={t}
-        chapters={chapters}
-        setChapters={setChapters}
-        prefaceNote={prefaceNote}
-        setPrefaceNote={setPrefaceNote}
-        conclusionNote={conclusionNote}
-        setConclusionNote={setConclusionNote}
-      />
+            <h3 className="text-2xl sm:text-3xl font-bold font-urdu text-white tracking-tight">
+              {title.trim() || 'آپ کی کتاب تیار ہے'}
+            </h3>
 
-      {/* 7. BOOK PREVIEW AREA */}
-      <BookPreview
-        t={t}
-        title={title}
-        subtitle={subtitle}
-        authorName={authorName}
-        genre={genre}
-        rawText={rawText}
-        prefaceNote={prefaceNote}
-        conclusionNote={conclusionNote}
-        chapters={chapters}
-        onExportPdf={handleExportPdf}
-        onShareBook={handleShareBook}
-        isExportingPdf={isExportingPdf}
-        isSharingPdf={isSharingPdf}
-      />
+            <p className="text-slate-300 text-xs sm:text-sm font-urdu max-w-lg mx-auto">
+              کتاب کے صفحات، فہرست، سرورق اور فونٹس کا مکمل مطالعہ کرنے کے لیے نیچے دیے گئے بٹن پر کلک کریں۔
+            </p>
+          </div>
 
-      {/* 8. FINAL ACTION AREA */}
-      <FinalActionArea
-        t={t}
-        onGenerateBook={handleGenerateBook}
-        isGeneratingBook={isGeneratingBook}
-        generationStatusText={generationStatusText}
-        generationError={generationError}
-        onExportPdf={handleExportPdf}
-        onShareBook={handleShareBook}
-        isExportingPdf={isExportingPdf}
-        isSharingPdf={isSharingPdf}
-        pdfStatusMessage={pdfStatusMessage}
-      />
+          {/* Prominent Primary Action Button */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+            <button
+              onClick={() => setIsFullBookViewOpen(true)}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-3 px-8 py-4 bg-[#D4AF37] hover:bg-[#c49f2e] text-[#0F172A] font-bold font-urdu text-base sm:text-lg rounded-xl shadow-lg transition-all transform active:scale-95 cursor-pointer"
+            >
+              <BookOpen className="w-6 h-6" />
+              <span>📖 تیار کتاب دیکھیں</span>
+            </button>
 
-      {/* 9. FOOTER */}
-      <Footer
-        t={t}
-        language={language}
-        onLanguageChange={setLanguage}
-      />
+            <button
+              onClick={() => setIsEditorOpen(!isEditorOpen)}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-4 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold font-urdu text-sm sm:text-base rounded-xl transition-colors cursor-pointer"
+            >
+              <Edit3 className="w-5 h-5 text-[#D4AF37]" />
+              <span>{isEditorOpen ? 'ترمیم بند کریں' : '✏️ مسودہ میں ترمیم'}</span>
+            </button>
+          </div>
 
-      {/* PHASE INFO MODAL */}
-      <PhaseInfoModal
-        t={t}
-        actionType={modalAction}
-        onClose={() => setModalAction(null)}
-      />
+          {/* Export & Share Options */}
+          <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-center gap-3">
+            <button
+              onClick={handleExportPdf}
+              disabled={isExportingPdf || isSharingPdf}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded-xl text-xs sm:text-sm font-bold font-urdu transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {isExportingPdf ? (
+                <Loader2 className="w-4 h-4 animate-spin text-[#D4AF37]" />
+              ) : (
+                <FileDown className="w-4 h-4 text-[#D4AF37]" />
+              )}
+              <span>⬇️ PDF حاصل کریں</span>
+            </button>
+
+            <button
+              onClick={handleShareBook}
+              disabled={isExportingPdf || isSharingPdf}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs sm:text-sm font-bold font-urdu transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {isSharingPdf ? (
+                <Loader2 className="w-4 h-4 animate-spin text-slate-300" />
+              ) : (
+                <Share2 className="w-4 h-4 text-slate-300" />
+              )}
+              <span>↗️ PDF شیئر کریں</span>
+            </button>
+          </div>
+
+          {/* PDF Status Notification */}
+          {pdfStatusMessage && (
+            <div className="p-2.5 bg-amber-500/20 border border-amber-500/40 rounded-lg text-amber-200 text-xs font-urdu text-center flex items-center justify-center gap-2">
+              {(isExportingPdf || isSharingPdf) && <Loader2 className="w-3.5 h-3.5 animate-spin text-[#D4AF37]" />}
+              <span>{pdfStatusMessage}</span>
+            </div>
+          )}
+
+        </div>
+      </div>
+
+      {/* FOCUSED MANUSCRIPT EDITOR (If toggled) */}
+      {isEditorOpen && (
+        <BookEditor
+          t={t}
+          title={title}
+          setTitle={setTitle}
+          subtitle={subtitle}
+          setSubtitle={setSubtitle}
+          authorName={authorName}
+          setAuthorName={setAuthorName}
+          prefaceNote={prefaceNote}
+          setPrefaceNote={setPrefaceNote}
+          conclusionNote={conclusionNote}
+          setConclusionNote={setConclusionNote}
+          chapters={chapters}
+          setChapters={setChapters}
+          onDoneEditing={() => {
+            setIsEditorOpen(false);
+            setIsFullBookViewOpen(true);
+          }}
+        />
+      )}
+
+      {/* FULL SCREEN PREMIUM BOOK VIEW MODAL */}
+      {isFullBookViewOpen && (
+        <BookPreview
+          t={t}
+          title={title}
+          setTitle={setTitle}
+          subtitle={subtitle}
+          setSubtitle={setSubtitle}
+          authorName={authorName}
+          setAuthorName={setAuthorName}
+          genre={genre}
+          rawText={rawText}
+          prefaceNote={prefaceNote}
+          conclusionNote={conclusionNote}
+          chapters={chapters}
+          bodyFontSize={bodyFontSize}
+          setBodyFontSize={setBodyFontSize}
+          pageSize={pageSize}
+          setPageSize={setPageSize}
+          orientation={orientation}
+          setOrientation={setOrientation}
+          autoLayout={autoLayout}
+          setAutoLayout={setAutoLayout}
+          coverConfig={coverConfig}
+          setCoverConfig={setCoverConfig}
+          isOpenModal={true}
+          onCloseModal={() => setIsFullBookViewOpen(false)}
+        />
+      )}
+
+      {/* 6. FOOTER (Clean, No language buttons) */}
+      <Footer t={t} />
     </div>
   );
 }

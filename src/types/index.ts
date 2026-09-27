@@ -4,6 +4,22 @@ export type InputMode = 'text' | 'file' | 'audio';
 
 export type BookGenre = 'academic' | 'islamic' | 'literary' | 'self_help' | 'business' | 'memoir' | 'general';
 
+export type CoverLayout = 'classic_gold' | 'modern_minimal' | 'royal_islamic' | 'academic_slate' | 'minimal_dark';
+
+export interface CoverPageConfig {
+  title: string;
+  subtitle: string;
+  authorName: string;
+  additionalText: string;
+  logoUrl?: string;
+  layout: CoverLayout;
+  alignment: 'center' | 'right' | 'left';
+  themeColor: string;
+  backgroundColor: string;
+  showFrameBorder: boolean;
+  isRtl: boolean;
+}
+
 export interface AttachedFile {
   id: string;
   name: string;
@@ -57,6 +73,8 @@ export interface BookMetadata {
   chapters: ChapterOutline[];
   conclusionNote: string;
   generatedBook?: GeneratedBookData;
+  coverConfig?: CoverPageConfig;
 }
 
 export type PreviewPage = 'cover' | 'title_page' | 'toc' | 'conclusion' | string;
+

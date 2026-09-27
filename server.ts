@@ -26,13 +26,48 @@ function getGeminiClient(): GoogleGenAI {
   });
 }
 
+// Helper to call Gemini API with limited exponential backoff for 503/UNAVAILABLE errors
+async function callGeminiWithRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  initialDelayMs = 1200
+): Promise<T> {
+  let lastError: any;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = String(err?.message || err || '').toLowerCase();
+      const status = err?.status || err?.code || err?.response?.status;
+      const is503OrUnavailable =
+        status === 503 ||
+        errMsg.includes('503') ||
+        errMsg.includes('unavailable') ||
+        errMsg.includes('resourceexhausted') ||
+        errMsg.includes('overloaded') ||
+        errMsg.includes('high demand') ||
+        errMsg.includes('temporarily unavailable');
+
+      if (is503OrUnavailable && attempt < maxRetries) {
+        const delay = initialDelayMs * Math.pow(2, attempt - 1);
+        console.warn(`[Gemini API] Retry attempt ${attempt}/${maxRetries} after 503/UNAVAILABLE. Waiting ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw lastError;
+}
+
 // POST /api/generate-book - Real Gemini Book Generation Endpoint
 app.post('/api/generate-book', async (req, res) => {
   try {
     const { content, title, authorName, genre, language } = req.body;
 
     if (!content || typeof content !== 'string' || !content.trim()) {
-      return res.status(400).json({ error: 'Source content is required to generate a book.' });
+      return res.status(400).json({ error: 'کتاب تیار کرنے کے لیے تحریری مواد فراہم کرنا ضروری ہے۔' });
     }
 
     const ai = getGeminiClient();
@@ -90,18 +125,20 @@ Target Schema:
 ${content}
 """`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        systemInstruction,
-        responseMimeType: 'application/json',
-      },
-    });
+    const response = await callGeminiWithRetry(() =>
+      ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: prompt,
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+        },
+      })
+    );
 
     const responseText = response.text;
     if (!responseText || !responseText.trim()) {
-      throw new Error('Gemini API returned an empty response.');
+      throw new Error('Gemini API کی جانب سے خالی جواب موصول ہوا۔');
     }
 
     // Clean potential markdown codeblock formatting if present
@@ -116,18 +153,18 @@ ${content}
       parsedBook = JSON.parse(cleanedJson);
     } catch (parseErr) {
       console.error('Failed to parse Gemini JSON response:', responseText);
-      throw new Error('Gemini returned malformed JSON data that could not be parsed.');
+      throw new Error('Gemini AI کی جانب سے حاصل شدہ جواب درست JSON فارمیٹ میں نہیں تھا۔');
     }
 
     // Validation
     if (!parsedBook || typeof parsedBook !== 'object') {
-      throw new Error('Invalid response structure returned by Gemini AI.');
+      throw new Error('Gemini AI کا ڈیٹا معتبر ساخت پر پورا نہیں اترتا۔');
     }
     if (!parsedBook.title || typeof parsedBook.title !== 'string' || !parsedBook.title.trim()) {
-      throw new Error('Generated book response is missing a valid title.');
+      throw new Error('کتاب کا عنوان تیار نہیں ہو سکا۔');
     }
     if (!Array.isArray(parsedBook.chapters) || parsedBook.chapters.length === 0) {
-      throw new Error('Generated book must contain at least one chapter.');
+      throw new Error('کتاب میں کم از کم ایک باب ہونا ضروری ہے۔');
     }
 
     // Sanitize and validate chapters
@@ -171,8 +208,20 @@ ${content}
     });
   } catch (error: any) {
     console.error('Error in /api/generate-book:', error);
-    return res.status(500).json({
-      error: error.message || 'An error occurred while generating the book with Gemini AI.',
+    const errMsg = String(error?.message || error || '');
+    const is503 =
+      errMsg.includes('503') ||
+      errMsg.includes('UNAVAILABLE') ||
+      errMsg.includes('Overloaded') ||
+      errMsg.includes('temporarily unavailable');
+
+    const statusCode = is503 ? 503 : 500;
+    const userFacingError = is503
+      ? 'Gemini AI سرور اس وقت عارضی طور پر مصروف (503 Unavailable) ہے۔ برائے مہربانی چند لمحوں بعد "کتاب تیار کریں" پر دوبارہ کلک کریں۔'
+      : (error.message || 'Gemini AI کے ساتھ رابطہ قائم نہیں ہو سکا۔');
+
+    return res.status(statusCode).json({
+      error: userFacingError,
     });
   }
 });

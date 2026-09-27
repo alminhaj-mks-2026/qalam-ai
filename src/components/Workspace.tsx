@@ -1,7 +1,20 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { TranslationDictionary } from '../i18n/translations';
 import { InputMode, BookGenre, AttachedFile } from '../types';
-import { FileText, Upload, Mic, Trash2, CheckCircle2, FileCode, Music, Info, Plus, Cpu, Loader2, AlertCircle } from 'lucide-react';
+import {
+  FileText,
+  Upload,
+  Mic,
+  Trash2,
+  FileCode,
+  Music,
+  Plus,
+  Cpu,
+  Loader2,
+  AlertCircle,
+  Square,
+  Volume2
+} from 'lucide-react';
 
 interface WorkspaceProps {
   t: TranslationDictionary;
@@ -9,16 +22,18 @@ interface WorkspaceProps {
   setInputMode: (mode: InputMode) => void;
   rawText: string;
   setRawText: (text: string) => void;
+  title: string;
+  setTitle: (title: string) => void;
   authorName: string;
   setAuthorName: (name: string) => void;
   genre: BookGenre;
   setGenre: (genre: BookGenre) => void;
   attachedFiles: AttachedFile[];
   setAttachedFiles: React.Dispatch<React.SetStateAction<AttachedFile[]>>;
-  onGenerateBook?: () => void;
-  isGeneratingBook?: boolean;
-  generationError?: string | null;
-  generationStatusText?: string | null;
+  onGenerateBook: () => void;
+  isGeneratingBook: boolean;
+  generationError: string | null;
+  generationStatusText: string | null;
 }
 
 export const Workspace: React.FC<WorkspaceProps> = ({
@@ -27,6 +42,8 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   setInputMode,
   rawText,
   setRawText,
+  title,
+  setTitle,
   authorName,
   setAuthorName,
   genre,
@@ -34,20 +51,85 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   attachedFiles,
   setAttachedFiles,
   onGenerateBook,
-  isGeneratingBook = false,
-  generationError = null,
-  generationStatusText = null,
+  isGeneratingBook,
+  generationError,
+  generationStatusText,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
 
+  // Live Microphone Recording States
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<any>(null);
+
   const wordCount = rawText.trim() ? rawText.trim().split(/\s+/).length : 0;
   const charCount = rawText.length;
+
+  // Recording Timer Effect
+  useEffect(() => {
+    if (isRecording) {
+      timerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setRecordingSeconds(0);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isRecording]);
+
+  const startRecording = async () => {
+    try {
+      audioChunksRef.current = [];
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const newFile: AttachedFile = {
+          id: Math.random().toString(36).substring(2, 9),
+          name: `وائس ریکارڈنگ (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}).webm`,
+          size: audioBlob.size,
+          type: 'wav',
+          category: 'audio',
+          uploadDate: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setAttachedFiles((prev) => [...prev, newFile]);
+        // Clean stream tracks
+        stream.getTracks().forEach((track) => track.stop());
+      };
+
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Microphone access error:', err);
+      alert('مائیکروفون تک رسائی ممکن نہیں ہو سکی۔ براہِ کرم براؤزر پرومپٹ سے مائیکروفون کی اجازت دیں۔');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, category: 'document' | 'audio') => {
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
-    
+
     files.forEach((file) => {
       const ext = file.name.split('.').pop()?.toLowerCase() || '';
       let type: AttachedFile['type'] = 'txt';
@@ -64,7 +146,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
             setAttachedFiles((prev) => [
               ...prev,
               {
-                id: Math.random().toString(36).substr(2, 9),
+                id: Math.random().toString(36).substring(2, 9),
                 name: file.name,
                 size: file.size,
                 type,
@@ -80,7 +162,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         setAttachedFiles((prev) => [
           ...prev,
           {
-            id: Math.random().toString(36).substr(2, 9),
+            id: Math.random().toString(36).substring(2, 9),
             name: file.name,
             size: file.size,
             type,
@@ -106,30 +188,41 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     { id: 'general', label: t.genreGeneral },
   ];
 
+  const formatTimer = (sec: number) => {
+    const mins = Math.floor(sec / 60);
+    const secs = sec % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   return (
-    <section id="workspace" className="py-10 px-4 sm:px-6 bg-white border-y border-slate-200/80">
+    <section id="workspace" className="py-8 px-4 sm:px-6 bg-white border-y border-slate-200/80">
       <div className="max-w-4xl mx-auto space-y-6">
         
-        {/* Header */}
-        <div className="border-b border-slate-200 pb-4">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-bold font-urdu text-[#0F172A]">
-                {t.workspaceTitle}
-              </h2>
-              <p className="text-xs sm:text-sm font-urdu text-slate-600 mt-1">
-                {t.workspaceSubtitle}
-              </p>
-            </div>
-            
-            <div className="text-xs font-urdu text-[#D4AF37] bg-amber-50 px-3 py-1 rounded-full border border-amber-200 font-semibold">
-              {t.phase1Notice}
-            </div>
-          </div>
+        {/* Workspace Title */}
+        <div className="border-b border-slate-200 pb-3">
+          <h2 className="text-xl sm:text-2xl font-bold font-urdu text-[#0F172A]">
+            {t.workspaceTitle}
+          </h2>
+          <p className="text-xs sm:text-sm font-urdu text-slate-600 mt-1">
+            اپنی تحریر، فائل یا آڈیو نوٹس درج کریں تاکہ Gemini AI کتاب تیار کر سکے۔
+          </p>
         </div>
 
-        {/* Author & Genre Configuration Bar */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-[#FBF9F5] p-4 rounded-xl border border-slate-200">
+        {/* Book Title, Author & Genre Configuration */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 bg-[#FBF9F5] p-4 rounded-xl border border-slate-200">
+          <div>
+            <label className="block text-xs font-bold font-urdu text-slate-700 mb-1">
+              کتاب کا عنوان (اختِیاری)
+            </label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="مثلاً: حکمتِ قلم اور جدید سائنس"
+              className="w-full px-3.5 py-2 text-xs sm:text-sm font-urdu bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A]"
+            />
+          </div>
+
           <div>
             <label className="block text-xs font-bold font-urdu text-slate-700 mb-1">
               {t.authorLabel}
@@ -139,7 +232,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               value={authorName}
               onChange={(e) => setAuthorName(e.target.value)}
               placeholder={t.authorPlaceholder}
-              className="w-full px-3.5 py-2 text-sm font-urdu bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A] focus:ring-1 focus:ring-[#0F172A]"
+              className="w-full px-3.5 py-2 text-xs sm:text-sm font-urdu bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A]"
             />
           </div>
 
@@ -150,7 +243,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
             <select
               value={genre}
               onChange={(e) => setGenre(e.target.value as BookGenre)}
-              className="w-full px-3.5 py-2 text-sm font-urdu bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A] focus:ring-1 focus:ring-[#0F172A]"
+              className="w-full px-3.5 py-2 text-xs sm:text-sm font-urdu bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A]"
             >
               {genresList.map((g) => (
                 <option key={g.id} value={g.id}>
@@ -165,7 +258,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200 overflow-x-auto">
           <button
             onClick={() => setInputMode('text')}
-            className={`flex-1 min-w-[140px] px-3 py-2.5 text-xs sm:text-sm font-bold font-urdu rounded-lg transition-all flex items-center justify-center gap-2 ${
+            className={`flex-1 min-w-[130px] px-3 py-2.5 text-xs sm:text-sm font-bold font-urdu rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
               inputMode === 'text'
                 ? 'bg-[#0F172A] text-[#D4AF37] shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
@@ -177,7 +270,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
 
           <button
             onClick={() => setInputMode('file')}
-            className={`flex-1 min-w-[140px] px-3 py-2.5 text-xs sm:text-sm font-bold font-urdu rounded-lg transition-all flex items-center justify-center gap-2 ${
+            className={`flex-1 min-w-[130px] px-3 py-2.5 text-xs sm:text-sm font-bold font-urdu rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
               inputMode === 'file'
                 ? 'bg-[#0F172A] text-[#D4AF37] shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
@@ -189,7 +282,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
 
           <button
             onClick={() => setInputMode('audio')}
-            className={`flex-1 min-w-[140px] px-3 py-2.5 text-xs sm:text-sm font-bold font-urdu rounded-lg transition-all flex items-center justify-center gap-2 ${
+            className={`flex-1 min-w-[130px] px-3 py-2.5 text-xs sm:text-sm font-bold font-urdu rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
               inputMode === 'audio'
                 ? 'bg-[#0F172A] text-[#D4AF37] shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
@@ -218,8 +311,8 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               value={rawText}
               onChange={(e) => setRawText(e.target.value)}
               placeholder={t.textInputPlaceholder}
-              rows={8}
-              className="w-full p-4 text-sm font-urdu leading-relaxed bg-white border border-slate-300 rounded-xl focus:outline-none focus:border-[#0F172A] focus:ring-1 focus:ring-[#0F172A] resize-y shadow-xs"
+              rows={9}
+              className="w-full p-4 text-sm font-urdu leading-relaxed bg-white border border-slate-300 rounded-xl focus:outline-none focus:border-[#0F172A] focus:ring-1 focus:ring-[#0F172A] resize-y shadow-2xs"
             />
           </div>
         )}
@@ -251,7 +344,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 {t.fileUploadSubtitle}
               </p>
 
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#0F172A] text-[#D4AF37] text-xs font-bold font-urdu rounded-lg shadow-xs">
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#0F172A] text-[#D4AF37] text-xs font-bold font-urdu rounded-lg shadow-2xs">
                 <Plus className="w-4 h-4" />
                 <span>{t.fileSelectBtn}</span>
               </div>
@@ -265,42 +358,73 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           </div>
         )}
 
-        {/* TAB 3: AUDIO UPLOAD */}
+        {/* TAB 3: AUDIO UPLOAD & RECORDING */}
         {inputMode === 'audio' && (
           <div className="space-y-4">
             <input
               type="file"
               ref={audioInputRef}
               onChange={(e) => handleFileUpload(e, 'audio')}
-              accept=".mp3,.wav,.m4a"
+              accept=".mp3,.wav,.m4a,.webm"
               multiple
               className="hidden"
             />
 
-            <div
-              onClick={() => audioInputRef.current?.click()}
-              className="border-2 border-dashed border-slate-300 hover:border-[#0F172A] bg-[#FBF9F5] rounded-xl p-8 text-center cursor-pointer transition-all hover:bg-amber-50/30 group"
-            >
-              <div className="w-12 h-12 mx-auto rounded-full bg-amber-100 text-[#0F172A] flex items-center justify-center mb-3 group-hover:bg-[#0F172A] group-hover:text-[#D4AF37] transition-colors">
-                <Mic className="w-6 h-6" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Voice Record Option */}
+              <div className="border-2 border-slate-200 bg-[#FBF9F5] rounded-xl p-6 text-center flex flex-col justify-between items-center space-y-3">
+                <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center">
+                  <Mic className="w-6 h-6" />
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-bold font-urdu text-[#0F172A]">برائے راست آواز ریکارڈ کریں</h4>
+                  <p className="text-xs font-urdu text-slate-500 mt-1">مائیکروفون سے بول کر وائس نوٹ شامل کریں</p>
+                </div>
+
+                {isRecording ? (
+                  <div className="space-y-2 w-full">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-rose-500/10 text-rose-700 font-mono text-xs rounded-full animate-pulse border border-rose-300">
+                      <span className="w-2 h-2 rounded-full bg-rose-600" />
+                      <span>ریکارڈنگ جاری: {formatTimer(recordingSeconds)}</span>
+                    </div>
+                    <button
+                      onClick={stopRecording}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold font-urdu rounded-lg shadow-2xs transition-colors cursor-pointer"
+                    >
+                      <Square className="w-4 h-4" />
+                      <span>ریکارڈنگ مکمل کریں</span>
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={startRecording}
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold font-urdu rounded-lg shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Mic className="w-4 h-4" />
+                    <span>ریکارڈنگ شروع کریں</span>
+                  </button>
+                )}
               </div>
 
-              <h3 className="text-base font-bold font-urdu text-[#0F172A] mb-1">
-                {t.audioUploadTitle}
-              </h3>
-              <p className="text-xs font-urdu text-slate-600 mb-3">
-                {t.audioUploadSubtitle}
-              </p>
+              {/* Audio File Upload Option */}
+              <div
+                onClick={() => audioInputRef.current?.click()}
+                className="border-2 border-dashed border-slate-300 hover:border-[#0F172A] bg-[#FBF9F5] rounded-xl p-6 text-center cursor-pointer transition-all hover:bg-amber-50/30 flex flex-col justify-between items-center space-y-3 group"
+              >
+                <div className="w-12 h-12 rounded-full bg-amber-100 text-[#0F172A] flex items-center justify-center group-hover:bg-[#0F172A] group-hover:text-[#D4AF37] transition-colors">
+                  <Music className="w-6 h-6" />
+                </div>
 
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#0F172A] text-[#D4AF37] text-xs font-bold font-urdu rounded-lg shadow-xs">
-                <Music className="w-4 h-4" />
-                <span>{t.audioRecordBtn}</span>
-              </div>
+                <div>
+                  <h4 className="text-sm font-bold font-urdu text-[#0F172A]">آڈیو فائل اپ لوڈ کریں</h4>
+                  <p className="text-xs font-urdu text-slate-500 mt-1">MP3, WAV, M4A ریکارڈنگ ڈیوائس سے چنیں</p>
+                </div>
 
-              <div className="mt-4 flex items-center justify-center gap-3 text-[11px] font-mono text-slate-500">
-                <span className="px-2 py-0.5 bg-white border border-slate-200 rounded font-bold text-slate-700">MP3</span>
-                <span className="px-2 py-0.5 bg-white border border-slate-200 rounded font-bold text-slate-700">WAV</span>
-                <span className="px-2 py-0.5 bg-white border border-slate-200 rounded font-bold text-slate-700">M4A</span>
+                <div className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#0F172A] text-[#D4AF37] text-xs font-bold font-urdu rounded-lg shadow-2xs">
+                  <Volume2 className="w-4 h-4" />
+                  <span>آڈیو فائل منتخب کریں</span>
+                </div>
               </div>
             </div>
           </div>
@@ -320,7 +444,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 >
                   <div className="flex items-center gap-2 overflow-hidden">
                     {file.category === 'audio' ? (
-                      <Music className="w-4 h-4 text-amber-600 shrink-0" />
+                      <Music className="w-4 h-4 text-rose-600 shrink-0" />
                     ) : (
                       <FileCode className="w-4 h-4 text-slate-600 shrink-0" />
                     )}
@@ -334,7 +458,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
 
                   <button
                     onClick={() => removeFile(file.id)}
-                    className="p-1 text-slate-400 hover:text-red-600 transition-colors"
+                    className="p-1 text-slate-400 hover:text-red-600 transition-colors cursor-pointer"
                     title="حذف کریں"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -345,64 +469,53 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           </div>
         )}
 
-        {/* Primary Gemini Book Generation Action Button */}
-        {onGenerateBook && (
-          <div className="bg-[#0F172A] p-5 rounded-2xl border border-[#D4AF37]/40 shadow-xl space-y-3 text-center">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="text-right rtl:text-right ltr:text-left">
-                <h3 className="text-base font-bold font-urdu text-white flex items-center gap-2">
-                  <Cpu className="w-5 h-5 text-[#D4AF37]" />
-                  <span>Gemini AI سے حقیقی کتاب تیار کریں</span>
-                </h3>
-                <p className="text-xs font-urdu text-slate-300 mt-0.5">
-                  تمام مواد کا تجزیہ کر کے خوبصورت ابواب، فہرست مضامین اور مکمل کتاب تشکیل دیں۔
-                </p>
-              </div>
-
-              <button
-                onClick={onGenerateBook}
-                disabled={isGeneratingBook}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-7 py-3 bg-[#D4AF37] hover:bg-[#c49f2e] text-[#0F172A] font-bold font-urdu text-sm sm:text-base rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer shrink-0"
-              >
-                {isGeneratingBook ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    <span>کتاب تیار کی جا رہی ہے...</span>
-                  </>
-                ) : (
-                  <>
-                    <Cpu className="w-5 h-5" />
-                    <span>{t.generateBookBtn}</span>
-                  </>
-                )}
-              </button>
+        {/* Primary Gemini Book Generation Action */}
+        <div className="bg-[#0F172A] p-5 sm:p-6 rounded-2xl border border-[#D4AF37]/40 shadow-xl space-y-3">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="text-right rtl:text-right ltr:text-left">
+              <h3 className="text-base sm:text-lg font-bold font-urdu text-white flex items-center gap-2">
+                <Cpu className="w-5 h-5 text-[#D4AF37]" />
+                <span>کتاب تیار کریں (Build Book with Gemini AI)</span>
+              </h3>
+              <p className="text-xs font-urdu text-slate-300 mt-0.5">
+                AI تمام خام مواد کا تجزیہ کر کے خوبصورت ابواب، فہرست اور مکمل کتاب تشکیل دے گا۔
+              </p>
             </div>
 
-            {/* Status Indicator */}
-            {isGeneratingBook && generationStatusText && (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-200 text-xs font-urdu flex items-center justify-center gap-2 animate-pulse">
-                <Loader2 className="w-4 h-4 animate-spin text-[#D4AF37]" />
-                <span>{generationStatusText}</span>
-              </div>
-            )}
-
-            {/* Real Error Display */}
-            {generationError && (
-              <div className="p-3 bg-rose-950/80 border border-rose-500/50 rounded-xl text-rose-200 text-xs font-urdu flex items-center gap-2.5 text-right rtl:text-right ltr:text-left">
-                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
-                <span>{generationError}</span>
-              </div>
-            )}
+            <button
+              onClick={onGenerateBook}
+              disabled={isGeneratingBook}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-8 py-3.5 bg-[#D4AF37] hover:bg-[#c49f2e] text-[#0F172A] font-bold font-urdu text-base rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer shrink-0"
+            >
+              {isGeneratingBook ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>کتاب تیار کی جا رہی ہے...</span>
+                </>
+              ) : (
+                <>
+                  <Cpu className="w-5 h-5" />
+                  <span>کتاب تیار کریں</span>
+                </>
+              )}
+            </button>
           </div>
-        )}
 
-        {/* Real AI Integration Info Banner */}
-        <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-3.5 flex items-start gap-3">
-          <Info className="w-5 h-5 text-amber-800 shrink-0 mt-0.5" />
-          <div className="text-xs font-urdu text-amber-900 leading-relaxed">
-            <strong className="block mb-0.5">برائے راست Gemini 3.8 Flash AI کنیکشن:</strong>
-            آپ کی داخل کردہ تحریر براہِ راست گوگل کے آفیشل Gemini AI ماڈل کے پاس جائے گی اور اسے منطقی ابواب، عنوانات اور مکمل کتاب میں ترتیب دیا جائے گا۔
-          </div>
+          {/* Status Indicator */}
+          {isGeneratingBook && generationStatusText && (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-200 text-xs font-urdu flex items-center justify-center gap-2 animate-pulse">
+              <Loader2 className="w-4 h-4 animate-spin text-[#D4AF37]" />
+              <span>{generationStatusText}</span>
+            </div>
+          )}
+
+          {/* Real Error Display */}
+          {generationError && (
+            <div className="p-3 bg-rose-950/80 border border-rose-500/50 rounded-xl text-rose-200 text-xs font-urdu flex items-center gap-2.5 text-right rtl:text-right ltr:text-left">
+              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+              <span>{generationError}</span>
+            </div>
+          )}
         </div>
 
       </div>

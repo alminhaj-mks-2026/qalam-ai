@@ -47,11 +47,6 @@ export const Hero: React.FC<HeroProps> = ({ t, onStartClick }) => {
               </button>
             </div>
 
-            {/* Simple Trust Assurance Note */}
-            <p className="text-xs text-slate-400 font-urdu pt-1">
-              موبائل، ٹیبلٹ اور لیپ ٹاپ پر یکساں طور پر دستياب
-            </p>
-
           </div>
 
         </div>
