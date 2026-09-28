@@ -208,6 +208,108 @@ function parseGeminiError(error: any, modelUsed: string) {
   };
 }
 
+// Helper to clean, repair, and parse potentially truncated/incomplete Gemini JSON responses
+function repairTruncatedJson(jsonStr: string): string {
+  let cleaned = jsonStr.trim();
+  
+  // Clean markdown backticks wrapping if present
+  cleaned = cleaned
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  // If already completely valid, sanitize control characters and return
+  try {
+    const sanitized = cleaned.replace(/[\u0000-\u001F\u007F-\u009F]/g, (match) => {
+      if (match === '\n') return '\\n';
+      if (match === '\r') return '\\r';
+      if (match === '\t') return '\\t';
+      return '';
+    });
+    JSON.parse(sanitized);
+    return sanitized;
+  } catch (e) {}
+
+  // Tracking open quotes and brackets/braces to repair truncated JSON
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  let lastValidIndex = 0;
+
+  for (let i = 0; i < cleaned.length; i++) {
+    const char = cleaned[i];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      if (!inString) {
+        lastValidIndex = i;
+      }
+      continue;
+    }
+
+    if (inString) {
+      continue;
+    }
+
+    if (char === '{' || char === '[') {
+      stack.push(char);
+      lastValidIndex = i;
+    } else if (char === '}') {
+      if (stack[stack.length - 1] === '{') {
+        stack.pop();
+        lastValidIndex = i;
+      }
+    } else if (char === ']') {
+      if (stack[stack.length - 1] === '[') {
+        stack.pop();
+        lastValidIndex = i;
+      }
+    } else if (char === ',' || char === ':') {
+      // separator tokens
+    } else if (!/\s/.test(char)) {
+      lastValidIndex = i;
+    }
+  }
+
+  let truncated = cleaned.slice(0, lastValidIndex + 1);
+
+  if (inString) {
+    truncated += '"';
+  }
+
+  while (stack.length > 0) {
+    const opening = stack.pop();
+    if (opening === '{') {
+      truncated = truncated.trim().replace(/,$/, '');
+      truncated += '}';
+    } else if (opening === '[') {
+      truncated = truncated.trim().replace(/,$/, '');
+      truncated += ']';
+    }
+  }
+
+  // Final control character sanitization on the repaired string
+  const finalSanitized = truncated.replace(/[\u0000-\u001F\u007F-\u009F]/g, (match) => {
+    if (match === '\n') return '\\n';
+    if (match === '\r') return '\\r';
+    if (match === '\t') return '\\t';
+    return '';
+  });
+
+  return finalSanitized;
+}
+
 // POST /api/generate-pdf
 app.post('/api/generate-pdf', async (req, res) => {
   let browser;
@@ -375,16 +477,10 @@ ${content}
       throw new Error('Gemini API کی جانب سے خالی جواب موصول ہوا۔');
     }
 
-    // Clean potential markdown codeblock formatting if present
-    const cleanedJson = responseText
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
-
     let parsedBook;
     try {
-      parsedBook = JSON.parse(cleanedJson);
+      const repairedJson = repairTruncatedJson(responseText);
+      parsedBook = JSON.parse(repairedJson);
     } catch (parseErr) {
       console.error('Failed to parse Gemini JSON response:', responseText);
       throw new Error('Gemini AI کی جانب سے حاصل شدہ جواب درست JSON فارمیٹ میں نہیں تھا۔');
@@ -489,13 +585,18 @@ ${content.slice(0, 4000)}
     });
 
     const responseText = response.text;
-    const cleanedJson = (responseText || '[]')
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
+    if (!responseText || !responseText.trim()) {
+      throw new Error('Gemini API کی جانب سے خالی جواب موصول ہوا۔');
+    }
 
-    const suggestions = JSON.parse(cleanedJson);
+    let suggestions;
+    try {
+      const repairedJson = repairTruncatedJson(responseText);
+      suggestions = JSON.parse(repairedJson);
+    } catch (parseErr) {
+      console.error('Failed to parse suggested titles:', responseText);
+      throw new Error('عنوانات کی تجاویز درست فارمیٹ میں موصول نہیں ہوئیں۔');
+    }
     return res.json({ success: true, suggestions, modelUsed: requestedModel });
   } catch (error: any) {
     console.error('Error in /api/suggest-title:', error);
@@ -523,9 +624,13 @@ async function startServer() {
     app.use(express.static('dist'));
   }
 
-  app.listen(PORT, () => {
-    console.log(`Qalam AI Server running at http://localhost:${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    app.listen(PORT, () => {
+      console.log(`Qalam AI Server running at http://localhost:${PORT}`);
+    });
+  }
 }
 
 startServer();
+
+export default app;
