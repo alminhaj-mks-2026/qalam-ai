@@ -2,6 +2,9 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import puppeteer from 'puppeteer';
+import fs from 'fs';
+import path from 'path';
 
 dotenv.config();
 
@@ -9,6 +12,56 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '20mb' }));
+
+// Cached base64 fonts for zero-latency, offline font embedding in Puppeteer PDF
+let cachedNastaliqFontBase64 = '';
+let cachedNaskhFontBase64 = '';
+let cachedAmiriFontBase64 = '';
+
+function getLocalFontBase64(relPath: string): string {
+  try {
+    const fullPath = path.resolve(process.cwd(), relPath);
+    if (fs.existsSync(fullPath)) {
+      return `data:font/woff2;base64,${fs.readFileSync(fullPath).toString('base64')}`;
+    }
+  } catch (e) {
+    console.warn(`Could not load font from ${relPath}:`, e);
+  }
+  return '';
+}
+
+function getEmbeddedFontStyles(): string {
+  if (!cachedNastaliqFontBase64) {
+    cachedNastaliqFontBase64 = getLocalFontBase64('node_modules/@fontsource/noto-nastaliq-urdu/files/noto-nastaliq-urdu-arabic-400-normal.woff2');
+  }
+  if (!cachedNaskhFontBase64) {
+    cachedNaskhFontBase64 = getLocalFontBase64('node_modules/@fontsource/noto-naskh-arabic/files/noto-naskh-arabic-arabic-400-normal.woff2');
+  }
+  if (!cachedAmiriFontBase64) {
+    cachedAmiriFontBase64 = getLocalFontBase64('node_modules/@fontsource/amiri/files/amiri-arabic-400-normal.woff2');
+  }
+
+  return `
+    @font-face {
+      font-family: 'Noto Nastaliq Urdu';
+      src: ${cachedNastaliqFontBase64 ? `url('${cachedNastaliqFontBase64}') format('woff2')` : 'local("Noto Nastaliq Urdu"), serif'};
+      font-weight: 400;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: 'Noto Naskh Arabic';
+      src: ${cachedNaskhFontBase64 ? `url('${cachedNaskhFontBase64}') format('woff2')` : 'local("Noto Naskh Arabic"), serif'};
+      font-weight: 400;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: 'Amiri';
+      src: ${cachedAmiriFontBase64 ? `url('${cachedAmiriFontBase64}') format('woff2')` : 'local("Amiri"), serif'};
+      font-weight: 400;
+      font-style: normal;
+    }
+  `;
+}
 
 // Helper to get Gemini Client
 function getGeminiClient(): GoogleGenAI {
@@ -154,6 +207,92 @@ function parseGeminiError(error: any, modelUsed: string) {
     technicalDetails: errMsg.slice(0, 200),
   };
 }
+
+// POST /api/generate-pdf
+app.post('/api/generate-pdf', async (req, res) => {
+  let browser;
+  try {
+    const { htmlContent, pageSize, orientation } = req.body;
+    
+    if (!htmlContent) {
+      return res.status(400).json({ error: 'HTML content required' });
+    }
+
+    console.log(`[PDF Generator] Starting PDF generation for "${pageSize}" ${orientation}...`);
+
+    // Inject base64 fonts directly into the HTML <head> for instant rendering
+    const fontStyles = `<style id="embedded-mks-fonts">${getEmbeddedFontStyles()}</style>`;
+    let finalHtml = htmlContent;
+    if (finalHtml.includes('<head>')) {
+      finalHtml = finalHtml.replace('<head>', `<head>${fontStyles}`);
+    } else {
+      finalHtml = `<head>${fontStyles}</head>${finalHtml}`;
+    }
+
+    browser = await puppeteer.launch({ 
+      headless: true,
+      args: [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu'
+      ],
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH
+    });
+    
+    const page = await browser.newPage();
+    
+    // Set viewport for consistent rendering
+    await page.setViewport({ width: 1200, height: 1600 });
+
+    // Set content and wait for load
+    await page.setContent(finalHtml, { 
+      waitUntil: 'load',
+      timeout: 60000
+    });
+    
+    // Ensure all font faces are loaded
+    await page.evaluateHandle('document.fonts.ready');
+
+    // Render completely standard, unencrypted vector PDF
+    const pdfBuffer = await page.pdf({
+      format: (pageSize as any) || 'A4',
+      landscape: orientation === 'landscape',
+      printBackground: true,
+      displayHeaderFooter: false,
+      margin: { top: '0px', bottom: '0px', left: '0px', right: '0px' }, // Margins are handled in CSS
+      preferCSSPageSize: true,
+      timeout: 60000
+    });
+    
+    // CRITICAL: Convert Uint8Array to Node Buffer so Express does NOT serialize to JSON!
+    const finalBuffer = Buffer.from(pdfBuffer);
+    console.log(`[PDF Generator] Successfully generated unencrypted PDF buffer (${(finalBuffer.length / 1024).toFixed(1)} KB)`);
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', finalBuffer.length.toString());
+    res.setHeader('Content-Disposition', 'attachment; filename="book.pdf"');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    return res.end(finalBuffer);
+  } catch (error: any) {
+    console.error('Error generating PDF:', error);
+    res.status(500).json({ 
+      error: 'پی ڈی ایف بنانے کے دوران سرور پر خرابی پیش آئی۔',
+      details: error.message 
+    });
+  } finally {
+    if (browser) {
+      await browser.close().catch(e => console.error('Error closing browser:', e));
+    }
+  }
+});
 
 // POST /api/generate-book - Real Gemini Book Generation Endpoint
 app.post('/api/generate-book', async (req, res) => {
@@ -370,7 +509,11 @@ ${content.slice(0, 4000)}
 
 // Vite Integration for dev server / Express static for production
 async function startServer() {
+  // Serve fonts
+  app.use('/fonts', express.static('node_modules/@fontsource'));
+
   if (process.env.NODE_ENV !== 'production') {
+
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

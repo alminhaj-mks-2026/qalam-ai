@@ -477,6 +477,10 @@ export default function App() {
           quotaErrorInfo={quotaErrorInfo}
           isGeneratingBook={isGeneratingBook}
           onRetry={handleRetryGeneration}
+          onExportPdf={handleExportPdf}
+          onSharePdf={handleShareBook}
+          isExportingPdf={isExportingPdf}
+          isSharingPdf={isSharingPdf}
         />
       )}
 

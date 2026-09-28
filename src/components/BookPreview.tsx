@@ -29,7 +29,10 @@ import {
   AlertCircle,
   RefreshCw,
   Clock,
-  Zap
+  Zap,
+  FileDown,
+  Share2,
+  Loader2
 } from 'lucide-react';
 
 interface BookPreviewProps {
@@ -61,6 +64,10 @@ interface BookPreviewProps {
   quotaErrorInfo?: QuotaErrorInfo | null;
   isGeneratingBook?: boolean;
   onRetry?: (modelOverride?: 'gemini-3.8-flash' | 'gemini-3.1-flash-lite') => void;
+  onExportPdf?: () => void;
+  onSharePdf?: () => void;
+  isExportingPdf?: boolean;
+  isSharingPdf?: boolean;
 }
 
 export const BookPreview: React.FC<BookPreviewProps> = ({
@@ -92,6 +99,10 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
   quotaErrorInfo,
   isGeneratingBook,
   onRetry,
+  onExportPdf,
+  onSharePdf,
+  isExportingPdf,
+  isSharingPdf,
 }) => {
   const [currentPage, setCurrentPage] = useState<PreviewPage>('cover');
   const [zoomLevel, setZoomLevel] = useState<number>(100);
@@ -1048,7 +1059,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
       <div className="fixed inset-0 z-50 bg-[#0B0F19] text-slate-100 flex flex-col justify-between overflow-hidden p-3 sm:p-6 font-urdu">
         
         {/* Full Screen Top Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3 flex-wrap gap-2">
           <div className="flex items-center gap-2.5 overflow-hidden">
             <div className="w-8 h-8 rounded-lg bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40 flex items-center justify-center shrink-0">
               <Book className="w-4 h-4" />
@@ -1063,16 +1074,42 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={() => {
-              setIsFullScreen(false);
-              if (onCloseModal) onCloseModal();
-            }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold font-urdu transition-colors cursor-pointer shrink-0"
-          >
-            <Minimize2 className="w-4 h-4 text-[#D4AF37]" />
-            <span>اسکرین بند کریں</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {onExportPdf && (
+              <button
+                onClick={onExportPdf}
+                disabled={isExportingPdf || isSharingPdf}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#D4AF37] hover:bg-[#c49f2e] text-[#0F172A] font-bold text-xs rounded-xl shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+                title="پی ڈی ایف ڈاؤن لوڈ کریں"
+              >
+                {isExportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
+                <span className="hidden sm:inline">PDF حاصل کریں</span>
+              </button>
+            )}
+
+            {onSharePdf && (
+              <button
+                onClick={onSharePdf}
+                disabled={isExportingPdf || isSharingPdf}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-[#D4AF37] border border-[#D4AF37]/40 font-bold text-xs rounded-xl shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+                title="پی ڈی ایف فائل شیئر کریں"
+              >
+                {isSharingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Share2 className="w-3.5 h-3.5" />}
+                <span className="hidden sm:inline">PDF شیئر کریں</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                setIsFullScreen(false);
+                if (onCloseModal) onCloseModal();
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold font-urdu transition-colors cursor-pointer shrink-0"
+            >
+              <Minimize2 className="w-4 h-4 text-[#D4AF37]" />
+              <span className="hidden sm:inline">اسکرین بند کریں</span>
+            </button>
+          </div>
         </div>
 
         {/* Toolbar */}

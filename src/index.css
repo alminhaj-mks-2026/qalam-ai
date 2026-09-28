@@ -1,4 +1,9 @@
 @import "tailwindcss";
+@import "@fontsource/noto-nastaliq-urdu/index.css";
+@import "@fontsource/noto-naskh-arabic/index.css";
+@import "@fontsource/amiri/index.css";
+@import "@fontsource/plus-jakarta-sans/index.css";
+
 
 @layer utilities {
   .font-urdu {

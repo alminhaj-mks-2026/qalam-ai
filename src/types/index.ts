@@ -76,5 +76,22 @@ export interface BookMetadata {
   coverConfig?: CoverPageConfig;
 }
 
+export interface BookPdfParams {
+  title: string;
+  subtitle: string;
+  authorName: string;
+  genre?: string;
+  prefaceNote: string;
+  conclusionNote: string;
+  chapters: ChapterOutline[];
+  rawText?: string;
+  generatedBook?: GeneratedBookData | null;
+  bodyFontSize?: number;
+  pageSize?: 'A4' | 'A5' | 'Letter' | 'B5';
+  orientation?: 'portrait' | 'landscape';
+  autoLayout?: boolean;
+  coverConfig?: CoverPageConfig;
+}
+
 export type PreviewPage = 'cover' | 'title_page' | 'toc' | 'conclusion' | string;
 
