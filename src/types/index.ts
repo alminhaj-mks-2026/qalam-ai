@@ -17,6 +17,7 @@ export interface CoverPageConfig {
   themeColor: string;
   backgroundColor: string;
   showFrameBorder: boolean;
+  showWatermark?: boolean;
   isRtl: boolean;
 }
 
@@ -91,7 +92,34 @@ export interface BookPdfParams {
   orientation?: 'portrait' | 'landscape';
   autoLayout?: boolean;
   coverConfig?: CoverPageConfig;
+  showWatermark?: boolean;
 }
 
 export type PreviewPage = 'cover' | 'title_page' | 'toc' | 'conclusion' | string;
+
+export type JobStatus = 'pending' | 'planning' | 'in_progress' | 'completed' | 'failed' | 'cancelled';
+
+export interface BookJobStatusResponse {
+  success: boolean;
+  jobId: string;
+  status: JobStatus;
+  progressPercent: number;
+  currentStage: 'init' | 'searching' | 'outline' | 'chapter' | 'assembling' | 'completed' | 'failed';
+  currentChapterIndex?: number;
+  totalChapters?: number;
+  completedChaptersCount?: number;
+  message: string;
+  modelUsed?: string;
+  error?: string | null;
+  quotaErrorInfo?: {
+    isQuotaExhausted: boolean;
+    retryAfterSeconds: number;
+    model: string;
+    isDailyLimit?: boolean;
+    technicalDetails?: string;
+    statusCode?: number;
+    errorCode?: string;
+  } | null;
+  resumed?: boolean;
+}
 

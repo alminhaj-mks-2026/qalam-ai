@@ -33,7 +33,7 @@ function removeRepeatedHeading(contentStr: string, headingToCompare: string): st
   const cleanHeading = headingToCompare.replace(/^(باب\s*\d+\s*[:؛-]?\s*)/i, '').trim();
   if (!cleanHeading) return contentStr;
 
-  const escapedHeading = cleanHeading.replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&');
+  const escapedHeading = cleanHeading.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
   const regex = new RegExp(`^\\s*[*_#\\-\\[\\(]*\\s*${escapedHeading}\\s*[*_#\\-\\]\\)]*\\s*[:؛۔\\-\\n\\s]*`, 'u');
   return contentStr.replace(regex, '');
 }

@@ -27,7 +27,7 @@
 }
 
 /* Mixed Language & Typography Balance */
-.book-body-text {
+.book-body-text, .body-text {
   font-family: 'Noto Naskh Arabic', 'Noto Nastaliq Urdu', 'Amiri', 'Plus Jakarta Sans', serif;
   text-align: justify;
   text-justify: inter-word;
@@ -35,8 +35,22 @@
   direction: rtl;
 }
 
-.book-body-text p {
-  margin-bottom: 1rem;
+/* Book Paragraph Indentation (کتابی پیراگراف انڈینٹیشن) */
+.book-body-text p,
+.body-text p {
+  text-indent: 1.8em;
+  margin-top: 0;
+  margin-bottom: 0.9rem;
+  line-height: 2.2;
+}
+
+/* Headings, blockquotes, lists, and special blocks reset indentation */
+.book-body-text h1, .book-body-text h2, .book-body-text h3, .book-body-text h4, .book-body-text h5,
+.book-body-text blockquote, .book-body-text ul, .book-body-text ol, .book-body-text table,
+.body-text h1, .body-text h2, .body-text h3, .body-text h4, .body-text h5,
+.body-text blockquote, .body-text ul, .body-text ol, .body-text table,
+.summary-box, .chapter-title, .section-title {
+  text-indent: 0 !important;
 }
 
 /* Mixed Urdu/Arabic + English inline balance */

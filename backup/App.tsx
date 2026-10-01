@@ -260,57 +260,11 @@ export default function App() {
       if (savedJobId) {
         jobIdRef.current = savedJobId;
         attachToExistingJob(savedJobId);
-      } else {
-        // Hydrate from localStorage cache on mount if no active job is running
-        const cachedBook = localStorage.getItem('qalam_cached_generated_book');
-        if (cachedBook) {
-          const parsedBook = JSON.parse(cachedBook);
-          setGeneratedBook(parsedBook);
-          
-          const cachedTitle = localStorage.getItem('qalam_cached_title');
-          if (cachedTitle) setTitle(cachedTitle);
-          
-          const cachedSubtitle = localStorage.getItem('qalam_cached_subtitle');
-          if (cachedSubtitle) setSubtitle(cachedSubtitle);
-          
-          const cachedAuthor = localStorage.getItem('qalam_cached_author');
-          if (cachedAuthor) setAuthorName(cachedAuthor);
-          
-          const cachedPreface = localStorage.getItem('qalam_cached_preface');
-          if (cachedPreface) setPrefaceNote(cachedPreface);
-          
-          const cachedConclusion = localStorage.getItem('qalam_cached_conclusion');
-          if (cachedConclusion) setConclusionNote(cachedConclusion);
-          
-          const cachedChapters = localStorage.getItem('qalam_cached_chapters');
-          if (cachedChapters) setChapters(JSON.parse(cachedChapters));
-          
-          const cachedRawText = localStorage.getItem('qalam_cached_rawText');
-          if (cachedRawText) setRawText(cachedRawText);
-        }
       }
     } catch (e) {
-      console.warn('LocalStorage access/hydration error on mount:', e);
+      console.warn('LocalStorage access error on mount:', e);
     }
   }, []);
-
-  // Synchronize state changes to localStorage cache
-  useEffect(() => {
-    if (generatedBook) {
-      try {
-        localStorage.setItem('qalam_cached_generated_book', JSON.stringify(generatedBook));
-        localStorage.setItem('qalam_cached_title', title);
-        localStorage.setItem('qalam_cached_subtitle', subtitle || '');
-        localStorage.setItem('qalam_cached_author', authorName || '');
-        localStorage.setItem('qalam_cached_preface', prefaceNote || '');
-        localStorage.setItem('qalam_cached_conclusion', conclusionNote || '');
-        localStorage.setItem('qalam_cached_chapters', JSON.stringify(chapters));
-        localStorage.setItem('qalam_cached_rawText', rawText || '');
-      } catch (e) {
-        console.warn('Error saving book state to localStorage:', e);
-      }
-    }
-  }, [generatedBook, title, subtitle, authorName, prefaceNote, conclusionNote, chapters, rawText]);
 
   // Listen to visibilitychange only (when returning to tab) without focus-event flapping
   useEffect(() => {
@@ -438,7 +392,7 @@ export default function App() {
       } catch (e) {}
 
       // Automatically launch Full Screen Premium Book View on success
-      // setIsFullBookViewOpen(true);
+      setIsFullBookViewOpen(true);
     } catch (err: any) {
       if (err?.errorCode === 'JOB_CANCELLED') {
         console.log('[handleGenerateBook] Generation was cancelled by user.');

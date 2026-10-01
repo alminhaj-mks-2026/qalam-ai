@@ -502,17 +502,14 @@ export const Workspace: React.FC<WorkspaceProps> = ({
 
             <div className="flex items-center gap-2">
               <button
-                onClick={isGeneratingBook ? onCancelGeneration : onGenerateBook}
-                disabled={isGeneratingBook && !onCancelGeneration}
-                className={`w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-8 py-3.5 ${
-                  isGeneratingBook
-                    ? 'bg-rose-600 hover:bg-rose-700 text-white'
-                    : 'bg-[#D4AF37] hover:bg-[#c49f2e] text-[#0F172A]'
-                } font-bold font-urdu text-base rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-85 disabled:cursor-not-allowed cursor-pointer shrink-0`}
+                onClick={onGenerateBook}
+                disabled={isGeneratingBook}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-8 py-3.5 bg-[#D4AF37] hover:bg-[#c49f2e] text-[#0F172A] font-bold font-urdu text-base rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-85 disabled:cursor-not-allowed cursor-pointer shrink-0"
               >
                 {isGeneratingBook ? (
                   <>
-                    <span>کینسل کریں</span>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>کتاب تیار کی جا رہی ہے...</span>
                   </>
                 ) : (
                   <>
@@ -522,6 +519,18 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 )}
               </button>
 
+              {isGeneratingBook && onCancelGeneration && (
+                <button
+                  type="button"
+                  onClick={onCancelGeneration}
+                  title="کتاب سازی منسوخ کریں"
+                  aria-label="کتاب سازی منسوخ کریں"
+                  className="p-2.5 bg-slate-900 hover:bg-slate-850 text-[#D4AF37] hover:text-rose-400 border border-[#D4AF37]/40 hover:border-rose-500/50 rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center shrink-0 active:scale-95 text-xs font-urdu gap-1.5"
+                >
+                  <X className="w-4 h-4 shrink-0" />
+                  <span className="hidden sm:inline">منسوخ کریں</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -532,7 +541,18 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                 <Loader2 className="w-4 h-4 animate-spin text-[#D4AF37] shrink-0" />
                 <span className="truncate">{generationStatusText}</span>
               </div>
-              {/* Removed cancel button */}            </div>
+              {onCancelGeneration && (
+                <button
+                  type="button"
+                  onClick={onCancelGeneration}
+                  title="کتاب سازی منسوخ کریں"
+                  aria-label="کتاب سازی منسوخ کریں"
+                  className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-850 text-[#D4AF37] hover:text-rose-400 border border-[#D4AF37]/30 hover:border-rose-500/40 transition-all cursor-pointer shrink-0 shadow-xs flex items-center justify-center active:scale-95"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           )}
 
           {/* Real Error & Quota Display with Clear Urdu Message & Retry Button */}

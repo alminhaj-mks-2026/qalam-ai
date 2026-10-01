@@ -1,0 +1,26 @@
+{
+  "jobId": "job_8294b67e62_1790742529613",
+  "contentHash": "8294b67e62c8fb5a207e710876b313c935e9c4c8d5d71d79a2cfa7b88246723a",
+  "createdAt": 1790742529613,
+  "updatedAt": 1790742529647,
+  "status": "cancelled",
+  "currentStage": "searching",
+  "currentChapterIndex": 0,
+  "totalChapters": 0,
+  "progressPercent": 8,
+  "message": "کتاب کی تیاری روک دی گئی ہے۔",
+  "modelUsed": "gemini-3.8-flash",
+  "attempts": 1,
+  "params": {
+    "content": "علم اور عمل کا باہمی تعلق\nعلم انسان کو بصیرت عطا کرتا ہے اور عمل اس بصیرت کو حقیقت میں بدلتا ہے۔",
+    "title": "علم اور عمل",
+    "authorName": "مفتی عبدالحفیظ",
+    "genre": "general",
+    "language": "ur"
+  },
+  "completedChapters": {},
+  "isProcessing": false,
+  "lastAttemptAt": 1790742529619,
+  "error": null,
+  "quotaErrorInfo": null
+}
