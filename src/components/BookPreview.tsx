@@ -118,9 +118,13 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
     const cleanHeading = headingToCompare.replace(/^(باب\s*\d+\s*[:؛-]?\s*)/i, '').trim();
     if (!cleanHeading) return contentStr;
 
-    const escapedHeading = cleanHeading.replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&');
-    const regex = new RegExp(`^\\s*[*_#\\-\\[\\(]*\\s*${escapedHeading}\\s*[*_#\\-\\]\\)]*\\s*[:؛۔\\-\\n\\s]*`, 'u');
-    return contentStr.replace(regex, '');
+    try {
+      const escapedHeading = cleanHeading.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+      const regex = new RegExp(`^\\s*[*_#\\-\\[\\(]*\\s*${escapedHeading}\\s*[*_#\\-\\]\\)]*\\s*[:؛۔\\-\\n\\s]*`, 'u');
+      return contentStr.replace(regex, '');
+    } catch (e) {
+      return contentStr;
+    }
   };
 
   // Local state fallbacks if external setters aren't provided
@@ -157,6 +161,12 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
 
   // Ensure current page is valid when chapters change
   const currentIdx = pageOrder.indexOf(currentPage) !== -1 ? pageOrder.indexOf(currentPage) : 0;
+
+  React.useEffect(() => {
+    if (pageOrder.indexOf(currentPage) === -1) {
+      setCurrentPage('cover');
+    }
+  }, [pageOrder.length, currentPage]);
 
   const handleNextPage = () => {
     if (currentIdx < pageOrder.length - 1) {
@@ -205,7 +215,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
 
   // Helper to render formatted book paragraphs with CSS indentation and clean breaks
   const renderBookParagraphs = (contentStr: string, fontSize: number) => {
-    if (!contentStr) return null;
+    if (!contentStr || typeof contentStr !== 'string') return null;
     const paragraphs = contentStr
       .split(/\n\s*\n|\n/)
       .map((p) => p.trim())
@@ -515,19 +525,19 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
               {currentChap?.sections && currentChap.sections.length > 0 ? (
                 <div className="space-y-3 font-urdu text-slate-800 pr-1 overscroll-contain">
                   {currentChap.sections.map((sec, sIdx) => {
-                    const cleanSecHeading = (sec.heading || '').trim();
-                    const cleanChapTitle = (currentChap.title || '').trim();
+                    const cleanSecHeading = (sec?.heading || '').trim();
+                    const cleanChapTitle = (currentChap?.title || '').trim();
                     const isRedundant = cleanSecHeading && (
                       cleanSecHeading === cleanChapTitle ||
                       cleanSecHeading.includes(cleanChapTitle) ||
                       cleanChapTitle.includes(cleanSecHeading)
                     );
 
-                    let cleanContent = sec.content || '';
-                    if (sec.heading) {
+                    let cleanContent = sec?.content || '';
+                    if (sec?.heading) {
                       cleanContent = removeRepeatedHeading(cleanContent, sec.heading);
                     }
-                    if (currentChap.title) {
+                    if (currentChap?.title) {
                       cleanContent = removeRepeatedHeading(cleanContent, currentChap.title);
                     }
 

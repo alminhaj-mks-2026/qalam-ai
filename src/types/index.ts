@@ -2,7 +2,7 @@ export type Language = 'ur' | 'en' | 'ar';
 
 export type InputMode = 'text' | 'file' | 'audio';
 
-export type BookGenre = 'academic' | 'islamic' | 'literary' | 'self_help' | 'business' | 'memoir' | 'general';
+export type BookGenre = 'academic' | 'islamic' | 'literary' | 'self_help' | 'business' | 'memoir' | 'general' | 'original_content';
 
 export type CoverLayout = 'classic_gold' | 'modern_minimal' | 'royal_islamic' | 'academic_slate' | 'minimal_dark';
 

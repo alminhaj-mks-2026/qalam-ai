@@ -12,12 +12,12 @@ export const Hero: React.FC<HeroProps> = ({ t, onStartClick }) => {
     <section className="relative pt-8 sm:pt-14 pb-10 sm:pb-16 px-4 sm:px-6">
       <div className="max-w-4xl mx-auto">
         
-        <div className="bg-[#0F172A] text-slate-100 rounded-2xl p-6 sm:p-12 border border-[#D4AF37]/30 shadow-xl relative overflow-hidden">
+        <div className="bg-[#0F172A] text-slate-100 rounded-2xl p-6 sm:p-12 border border-[#D4AF37]/30 shadow-xl relative">
           
           {/* Subtle gold line accent at top */}
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#D4AF37] to-transparent opacity-80" />
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#D4AF37] to-transparent opacity-80 rounded-t-2xl" />
           
-          <div className="text-center space-y-6 relative z-10">
+          <div className="text-center space-y-6 relative z-10 pt-2">
             
             {/* Subtle Brand Badge */}
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-800/80 border border-[#D4AF37]/30 text-[#D4AF37] text-xs font-medium tracking-wide">
@@ -25,13 +25,13 @@ export const Hero: React.FC<HeroProps> = ({ t, onStartClick }) => {
               <span className="font-brand text-xs uppercase tracking-wider">Qalam AI Platform</span>
             </div>
 
-            {/* Main Heading */}
-            <h1 className="text-2xl sm:text-4xl lg:text-5xl font-bold font-urdu text-white leading-relaxed sm:leading-snug text-balance">
+            {/* Main Heading with generous line height and top padding to prevent Nastaliq calligraphic loop clipping */}
+            <h1 className="text-2xl sm:text-4xl lg:text-5xl font-bold font-urdu text-white leading-[1.8] sm:leading-[1.7] text-balance pt-2 px-1">
               {t.heroHeading}
             </h1>
 
             {/* Description */}
-            <p className="text-slate-300 text-sm sm:text-lg font-urdu leading-relaxed max-w-2xl mx-auto text-balance">
+            <p className="text-slate-300 text-sm sm:text-lg font-urdu leading-[2.1] max-w-2xl mx-auto text-balance pt-1">
               {t.heroDescription}
             </p>
 

@@ -204,6 +204,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     { id: 'business', label: t.genreBusiness },
     { id: 'memoir', label: t.genreMemoir },
     { id: 'general', label: t.genreGeneral },
+    { id: 'original_content', label: t.genreOriginalContent },
   ];
 
   const formatTimer = (sec: number) => {
@@ -502,16 +503,17 @@ export const Workspace: React.FC<WorkspaceProps> = ({
 
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={isGeneratingBook ? onCancelGeneration : onGenerateBook}
-                disabled={isGeneratingBook && !onCancelGeneration}
-                className={`w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-8 py-3.5 ${
+                className={`w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-8 py-3.5 font-bold font-urdu text-base rounded-xl shadow-lg transition-all active:scale-95 cursor-pointer shrink-0 ${
                   isGeneratingBook
-                    ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                    ? 'bg-rose-700 hover:bg-rose-800 text-white'
                     : 'bg-[#D4AF37] hover:bg-[#c49f2e] text-[#0F172A]'
-                } font-bold font-urdu text-base rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-85 disabled:cursor-not-allowed cursor-pointer shrink-0`}
+                }`}
               >
                 {isGeneratingBook ? (
                   <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
                     <span>کینسل کریں</span>
                   </>
                 ) : (
@@ -521,18 +523,17 @@ export const Workspace: React.FC<WorkspaceProps> = ({
                   </>
                 )}
               </button>
-
             </div>
           </div>
 
-          {/* Status Indicator with compact Cancel button */}
+          {/* Status Indicator / Progress bar */}
           {isGeneratingBook && generationStatusText && (
             <div className="p-3 bg-slate-900/90 border border-[#D4AF37]/40 rounded-xl text-amber-200 text-xs font-urdu flex items-center justify-between gap-3 animate-fade-in shadow-inner">
               <div className="flex items-center gap-2 overflow-hidden">
                 <Loader2 className="w-4 h-4 animate-spin text-[#D4AF37] shrink-0" />
                 <span className="truncate">{generationStatusText}</span>
               </div>
-              {/* Removed cancel button */}            </div>
+            </div>
           )}
 
           {/* Real Error & Quota Display with Clear Urdu Message & Retry Button */}

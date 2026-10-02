@@ -111,6 +111,7 @@ export interface TranslationDictionary {
   genreBusiness: string;
   genreMemoir: string;
   genreGeneral: string;
+  genreOriginalContent: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -215,7 +216,8 @@ export const translations: Record<Language, TranslationDictionary> = {
     genreSelfHelp: 'خود ترقّی و رہنما',
     genreBusiness: 'کاروباری / پیشہ ورانہ',
     genreMemoir: 'سوانح حیات / یادداشتیں',
-    genreGeneral: 'عام معلوماتی'
+    genreGeneral: 'عام معلوماتی',
+    genreOriginalContent: 'اصل مواد'
   },
   en: {
     brandName: 'Qalam AI',
@@ -318,7 +320,8 @@ export const translations: Record<Language, TranslationDictionary> = {
     genreSelfHelp: 'Self-Help & Leadership',
     genreBusiness: 'Business & Professional',
     genreMemoir: 'Memoir / Biography',
-    genreGeneral: 'General Knowledge'
+    genreGeneral: 'General Knowledge',
+    genreOriginalContent: 'Original Content'
   },
   ar: {
     brandName: 'قلم AI',
@@ -421,6 +424,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     genreSelfHelp: 'تطوير الذات',
     genreBusiness: 'أعمال ومهني',
     genreMemoir: 'سيرة ذاتية / ذكريات',
-    genreGeneral: 'ثقافة عامة'
+    genreGeneral: 'ثقافة عامة',
+    genreOriginalContent: 'المحتوى الأصلي'
   }
 };

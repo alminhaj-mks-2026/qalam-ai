@@ -457,7 +457,7 @@ function repairTruncatedJson(jsonStr: string): string {
 app.post('/api/generate-pdf', async (req, res) => {
   let browser;
   try {
-    const { htmlContent, pageSize, orientation } = req.body;
+    const { htmlContent, pageSize, orientation, headerTemplate, footerTemplate } = req.body;
     
     if (!htmlContent) {
       return res.status(400).json({ error: 'HTML content required' });
@@ -503,13 +503,19 @@ app.post('/api/generate-pdf', async (req, res) => {
     // Ensure all font faces are loaded
     await page.evaluateHandle('document.fonts.ready');
 
+    const hasHeaderFooter = !!(headerTemplate || footerTemplate);
+
     // Render completely standard, unencrypted vector PDF
     const pdfBuffer = await page.pdf({
       format: (pageSize as any) || 'A4',
       landscape: orientation === 'landscape',
       printBackground: true,
-      displayHeaderFooter: false,
-      margin: { top: '0px', bottom: '0px', left: '0px', right: '0px' }, // Margins are handled in CSS
+      displayHeaderFooter: hasHeaderFooter,
+      headerTemplate: headerTemplate || '<div style="font-size: 8px;"></div>',
+      footerTemplate: footerTemplate || '<div style="font-size: 8px;"></div>',
+      margin: hasHeaderFooter
+        ? { top: '16mm', bottom: '16mm', left: '14mm', right: '14mm' }
+        : { top: '0px', bottom: '0px', left: '0px', right: '0px' },
       preferCSSPageSize: true,
       timeout: 60000
     });

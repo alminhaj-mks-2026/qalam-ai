@@ -83,6 +83,12 @@ export function proofreadUrduAndArabic(text: string): string {
   str = replaceUrduWord(str, 'قووموں', 'قوموں');
   str = replaceUrduWord(str, 'قووم', 'قوم');
 
+  // Fix common OCR / typing errors in garbled manuscript headings
+  str = str.replace(/اھڈیا/g, 'آئیڈیا');
+  str = str.replace(/کوئوں\s*کا/g, 'اور کاموں کا');
+  str = str.replace(/ہدء\s*و\s*عمل/g, 'جہد و عمل');
+  str = str.replace(/آئیڈیا\s*اور\s*کاموں\s*کا\s*جہد\s*و\s*عمل\s*\(Execution\)\s*سب\s*کچھ/g, 'آئیڈیا پر جہد و عمل (Execution) ہی سب کچھ ہے');
+
   // Fix common typo: اسقاق -> اسباق (e.g. تاریخی اسقاق -> تاریخی اسباق)
   str = replaceUrduWord(str, 'اسقاق', 'اسباق');
   str = str.replace(/تاریخی\s*اسقاق/g, 'تاریخی اسباق');
@@ -457,7 +463,7 @@ export function formatBookParagraphs(content: string): string {
 /**
  * Stage 5: Dignified Thematic Headings & Chapter Titles
  */
-export function sanitizeBookHeading(heading: string, defaultFallback: string = 'علمی نکتہ و فکری مبحث'): string {
+export function sanitizeBookHeading(heading: string, defaultFallback: string = ''): string {
   if (!heading || typeof heading !== 'string') return defaultFallback;
 
   let cleaned = heading.trim();
@@ -519,7 +525,7 @@ export function sanitizeBookHeading(heading: string, defaultFallback: string = '
 
   cleaned = words.join(' ').trim();
 
-  if (cleaned.length < 4 || words.length < 2 || /^(?:عنوان|ہیڈنگ|نکتہ|سبق|مبحث)$/i.test(cleaned)) {
+  if (cleaned.length < 3 || /^(?:عنوان|ہیڈنگ|نکتہ|سبق|مبحث)$/i.test(cleaned)) {
     return defaultFallback;
   }
 
@@ -529,21 +535,22 @@ export function sanitizeBookHeading(heading: string, defaultFallback: string = '
 /**
  * Derives a clean, dignified, complete thematic heading from a body text snippet without slicing through sentences.
  */
-export function deriveThematicHeading(snippet: string, fallback: string = 'بنیادی تفہیم و فکری مبحث'): string {
+export function deriveThematicHeading(snippet: string, fallback: string = ''): string {
   if (!snippet || typeof snippet !== 'string') return fallback;
 
   let trimmed = removeDilKiAwazSignatures(snippet).trim();
+  if (!trimmed) return fallback;
 
   // 1. Handle greetings
   if (/^السلام علیکم/i.test(trimmed)) {
     if (trimmed.includes('تاریخ') || trimmed.includes('عروج') || trimmed.includes('محنت')) {
       return 'تاریخی اسباق، علم اور محنت کا تسلسل';
     }
-    return 'افتتاحی کلمات اور فکری مقدمہ';
+    return fallback;
   }
 
   // 2. Hadith and prophetic citations
-  if (trimmed.includes('طَلَبُ الْعِلْمِ') || trimmed.includes('فَرِيضَةٌ')) {
+  if (trimmed.includes('طلب العلم') || trimmed.includes('طَلَبُ الْعِلْمِ') || trimmed.includes('فَرِيضَةٌ') || trimmed.includes('فرضیت')) {
     return 'حدیثِ مبارکہ ﷺ اور فرضیتِ علم';
   }
   if (trimmed.includes('نبی کریم') || trimmed.includes('رسول اللہ') || trimmed.includes('صلی اللہ علیہ وسلم') || trimmed.includes('ﷺ')) {
@@ -567,37 +574,17 @@ export function deriveThematicHeading(snippet: string, fallback: string = 'بن�
   if (trimmed.includes('شخصیت سازی') || trimmed.includes('اخلاقی تربیت')) {
     return 'شخصیت سازی اور اخلاقی تربیت کی اہمیت';
   }
-  if (trimmed.includes('مطالعہ') || trimmed.includes('فکر') || trimmed.includes('وسعت')) {
+  if (trimmed.includes('تحقیق') || trimmed.includes('شواہد')) {
+    return 'تحقیقی منہاج اور شواہد کی اہمیت';
+  }
+  if (trimmed.includes('مطالعہ') || trimmed.includes('فکر')) {
     return 'مطالعہ، وسعتِ فکر اور عملی رہنمائی';
   }
-  if (trimmed.includes('کل سے بہتر') || trimmed.includes('بصیرت')) {
-    return 'خود احتسابی اور علمی و عملی بصیرت';
-  }
 
-  // 6. Core thematic mapping
-  if (trimmed.includes('تعلیم') || trimmed.includes('علم')) {
-    if (trimmed.includes('اہمیت') || trimmed.includes('فضیلت')) return 'علم کی اہمیت اور فکری بنیادیں';
-    if (trimmed.includes('طریقہ') || trimmed.includes('حکمت')) return 'حصولِ علم کے اصول و طریقے';
-    if (trimmed.includes('عمل')) return 'علم و عمل کا باہمی ربط';
-    return 'علم، تفہیم اور فکری ارتقا';
-  }
-  if (trimmed.includes('تحقیق') || trimmed.includes('اصول') || trimmed.includes('شواہد')) {
-    return 'تحقیقی منہاج اور بنیادی ضوابط';
-  }
-  if (trimmed.includes('اخلاق') || trimmed.includes('تربیت') || trimmed.includes('کردار')) {
-    return 'اخلاقی اقدار اور عملی تربیت';
-  }
-  if (trimmed.includes('کتاب') || trimmed.includes('قلم') || trimmed.includes('نگارش')) {
-    return 'حکمتِ قلم اور تحریری اسلوب';
-  }
-  if (trimmed.includes('خواب') || trimmed.includes('جدوجہد') || trimmed.includes('صبر')) {
-    return 'عزم، جدوجہد اور استقامت کا راستہ';
-  }
-
-  const firstLine = trimmed.split('\n')[0].trim();
+  const firstLine = trimmed.split('\n')[0].replace(/[۔.؟!]+$/, '').trim();
   const cleanedFirst = sanitizeBookHeading(firstLine, fallback);
 
-  if (cleanedFirst.length >= 5 && cleanedFirst.length <= 40 && !cleanedFirst.includes('۔')) {
+  if (cleanedFirst && cleanedFirst.length >= 5 && cleanedFirst.length <= 50) {
     return cleanedFirst;
   }
 
@@ -621,7 +608,7 @@ export function deriveThematicTitleAndAuthor(
   if (providedTitle && providedTitle.trim() && providedTitle !== 'کتاب کا عنوان' && providedTitle !== 'حکمتِ قلم اور جدید سائنس') {
     return {
       title: sanitizeBookHeading(providedTitle),
-      subtitle: 'ایک منظم اور مفصل مطالعہ',
+      subtitle: '',
       authorName: author,
     };
   }
@@ -630,7 +617,7 @@ export function deriveThematicTitleAndAuthor(
   if (text.includes('تاریخ') && (text.includes('قوم') || text.includes('عروج') || text.includes('زوال'))) {
     return {
       title: 'تاریخ، اقوام اور عروج و زوال کے اسباق',
-      subtitle: 'ماضی کے تجربات کی روشنی میں مستقبل کی تعمیر',
+      subtitle: '',
       authorName: author,
     };
   }
@@ -638,7 +625,7 @@ export function deriveThematicTitleAndAuthor(
   if (text.includes('مہارت') || text.includes('سیکھنے') || text.includes('شخصیت سازی')) {
     return {
       title: 'شخصیت سازی اور مسلسل سیکھنے کے اصول',
-      subtitle: 'علم سے حقیقی مہارت اور خود شناسی کا سفر',
+      subtitle: '',
       authorName: author,
     };
   }
@@ -646,7 +633,7 @@ export function deriveThematicTitleAndAuthor(
   if (text.includes('حدیث') || text.includes('رسول اللہ') || text.includes('قرآن') || text.includes('طَلَبُ الْعِلْمِ')) {
     return {
       title: 'تعلیماتِ نبوی ﷺ اور فکری رہنمائی',
-      subtitle: 'علم و عمل کا باہمی ربط اور پاکیزہ زندگی کے رہنما اصول',
+      subtitle: '',
       authorName: author,
     };
   }
@@ -654,7 +641,7 @@ export function deriveThematicTitleAndAuthor(
   if (text.includes('تحقیق') || text.includes('منہاج') || text.includes('علم')) {
     return {
       title: 'علم، تفہیم اور فکری ارتقا',
-      subtitle: 'تحقیقی شعور اور عصری تقاضوں کا جامع مطالعہ',
+      subtitle: '',
       authorName: author,
     };
   }
@@ -662,17 +649,19 @@ export function deriveThematicTitleAndAuthor(
   // Extract from first meaningful line
   const firstLine = text.split('\n').map((l) => l.trim()).find((l) => l.length > 8 && l.length < 50);
   if (firstLine) {
-    const derivedHeading = sanitizeBookHeading(firstLine, 'فکری و علمی رہنما');
-    return {
-      title: derivedHeading,
-      subtitle: 'ایک فکری و عملی مطالعہ',
-      authorName: author,
-    };
+    const derivedHeading = sanitizeBookHeading(firstLine, '');
+    if (derivedHeading) {
+      return {
+        title: derivedHeading,
+        subtitle: '',
+        authorName: author,
+      };
+    }
   }
 
   return {
-    title: 'فکری بصیرت اور عملی رہنمائی',
-    subtitle: 'ایک منظم اور مفصل مطالعہ',
+    title: 'کتابی مجموعہ',
+    subtitle: '',
     authorName: author,
   };
 }
@@ -680,14 +669,16 @@ export function deriveThematicTitleAndAuthor(
 /**
  * Semantically derives a substantive Preface / Foreword (دیباچہ و پیش لفظ)
  * based directly on the actual themes, topics, and central message of the manuscript.
- * Strictly avoids generic system filler text like "اس کتاب کا بنیادی مقصد خام خیالات...".
+ * Strictly avoids generic system filler text or creating prefaces when not present in original.
  */
 export function deriveSubstantivePreface(
   manuscriptText: string,
   title?: string,
   author?: string,
-  language: string = 'ur'
+  language: string = 'ur',
+  isOriginalContent: boolean = false
 ): string {
+  if (isOriginalContent) return '';
   const cleaned = removeDilKiAwazSignatures(manuscriptText).trim();
   if (!cleaned) return '';
 
@@ -702,47 +693,23 @@ export function deriveSubstantivePreface(
     return explicitIntro;
   }
 
-  // 2. Synthesize a content-aligned preface derived strictly from the manuscript's actual themes
-  const topics: string[] = [];
-  if (cleaned.includes('تاریخ') || cleaned.includes('قوم') || cleaned.includes('عروج')) {
-    topics.push('اقوامِ عالم کی تاریخ اور عروج و زوال کے اہم اسباق');
-  }
-  if (cleaned.includes('مہارت') || cleaned.includes('سیکھ')) {
-    topics.push('مسلسل سیکھنے کے اصول اور جدید مہارتوں کا حصول');
-  }
-  if (cleaned.includes('شخصیت سازی') || cleaned.includes('اخلاق') || cleaned.includes('کردار')) {
-    topics.push('شخصیت سازی، اخلاقی اقدار اور خود احتسابی');
-  }
-  if (cleaned.includes('حدیث') || cleaned.includes('رسول اللہ') || cleaned.includes('علم')) {
-    topics.push('تعلیماتِ نبوی ﷺ کی روشنی میں علم کی طلب اور فکری بیداری');
-  }
-
-  // Take the core substantive opening from the author's first paragraph
-  const firstSubstantive = paragraphs[0] || '';
-
-  if (topics.length > 0) {
-    const topicSummary = topics.join('، ');
-    return `زیرِ نظر تصنیف میں ${topicSummary} پر جامع انداز میں روشنی ڈالی گئی ہے۔ اس کتاب کا بنیادی محور یہ حقیقت اجاگر کرنا ہے کہ علم جب گہری سمجھ اور عملی اطلاق کے ساتھ اپنایا جائے تو انسان کی فکری و اخلاقی زندگی میں نمایاں مثبت تبدیلی رونما ہوتی ہے۔ مصنف نے مسودے میں پیش کردہ نکات کو استدلال اور فکری تسلسل کے ساتھ قاری کے سامنے پیش کیا ہے تاکہ ہر نکتہ فہم اور عمل کے راستے کھول سکے۔\n\n${firstSubstantive.slice(0, 220)}${firstSubstantive.length > 220 ? '۔۔۔' : ''}`;
-  }
-
-  if (firstSubstantive) {
-    return `زیرِ نظر کتاب کا متن فکری بصیرت، علمی تفہیم اور عملی رہنمائی کے بنیادی اصولوں پر استوار ہے۔ اس میں بیان کردہ مباحث قاری کو غور و فکر اور خود احتسابی کی دعوت دیتے ہیں تاکہ حاصل شدہ علم عملی کردار اور روزمرہ زندگی کا حصہ بن سکے۔\n\n${firstSubstantive.slice(0, 250)}${firstSubstantive.length > 250 ? '۔۔۔' : ''}`;
-  }
-
-  return 'زیرِ نظر تصنیف میں علمی و فکری مباحث کو مربوط انداز میں پیش کیا گیا ہے تاکہ قاری کے لیے علم و عمل کے راستے آسان اور واضح ہو سکیں۔';
+  // If manuscript doesn't have an explicit preface/intro, return empty string (do not invent filler!)
+  return '';
 }
 
 /**
  * Semantically derives a substantive Conclusion / Epilogue (اختتامیہ و حاصلِ کلام)
  * based directly on the actual conclusions, deductions, and core message of the manuscript.
- * Strictly avoids shallow clichés.
+ * Strictly avoids shallow clichés or creating conclusions when not present in original.
  */
 export function deriveSubstantiveConclusion(
   manuscriptText: string,
   title?: string,
   author?: string,
-  language: string = 'ur'
+  language: string = 'ur',
+  isOriginalContent: boolean = false
 ): string {
+  if (isOriginalContent) return '';
   const cleaned = removeDilKiAwazSignatures(manuscriptText).trim();
   if (!cleaned) return '';
 
@@ -757,18 +724,8 @@ export function deriveSubstantiveConclusion(
     return explicitConclusion;
   }
 
-  // 2. Synthesize a content-aligned conclusion from the final thoughts of the manuscript
-  const lastSubstantive = paragraphs[paragraphs.length - 1] || '';
-
-  if (cleaned.includes('تاریخ') || cleaned.includes('مہارت') || cleaned.includes('شخصیت سازی')) {
-    return `کتاب کے تمام ابواب اور فکری مباحث کا خلاصہ یہ ہے کہ حقیقی کامیابی مسلسل سیکھنے، تاریخ کے اسباق سے رہنمائی پانے اور اپنی شخصیت کو اعلیٰ اخلاقی و عملی سانچے میں ڈھالنے میں مضمر ہے۔ علم کی اصل آزمائش معلومات کا انبار نہیں بلکہ اس کا وہ عملی اثر ہے جو انسان کے کردار اور معاشرے سے ظاہر ہوتا ہے۔\n\nامید ہے کہ اس مطالعے سے حاصل ہونے والی بصیرت قاری کے فکری ارتقا اور مستقل پیش رفت میں مفید ثابت ہوگی۔`;
-  }
-
-  if (lastSubstantive) {
-    return `اس تصنیف کے فکری سفر کا حاصل یہ ہے کہ صحیح فہم اور اخلاص کے ساتھ حاصل کیا گیا علم ہی انسان کے افکار اور اعمال کو سنوارتا ہے۔\n\n${lastSubstantive.slice(0, 250)}${lastSubstantive.length > 250 ? '۔۔۔' : ''}\n\nامید ہے کہ یہ کتاب قارئین کے لیے فکری رہنمائی اور مسلسل عمل کا پائیدار ذریعہ بنے گی۔`;
-  }
-
-  return 'حاصلِ مطالعہ یہ ہے کہ علم کو گہری سمجھ اور مستقل عمل کے ساتھ ہی پایۂ تکمیل تک پہنچایا جا سکتا ہے۔ امید ہے کہ یہ صفحات قارئین کے لیے فکری رہنمائی کا ذریعہ ثابت ہوں گے۔';
+  // If manuscript doesn't have an explicit conclusion, return empty string (do not invent filler!)
+  return '';
 }
 
 /**
@@ -776,18 +733,30 @@ export function deriveSubstantiveConclusion(
  */
 export function partitionManuscriptThematically(
   content: string,
-  targetChapterCount: number = 3
+  targetChapterCount: number = 3,
+  genre: string = 'academic'
 ): SemanticChapter[] {
   const cleanResult = cleanRawManuscript(content);
   const text = cleanResult.cleanedText.trim() || content.trim();
+
+  // BYPASS: If Original Content, do not partition semantically. 
+  // Return the entire text as a single chapter.
+  if (genre === 'original_content') {
+    return [{
+      id: 'chap-1',
+      title: 'اصل مسودہ',
+      summary: '',
+      sections: [{ heading: '', content: text }],
+    }];
+  }
 
   if (!text) {
     return [
       {
         id: 'chap-1',
-        title: 'باب ۱: فکری مباحث و تفہیم',
+        title: 'باب ۱',
         summary: '',
-        sections: [{ heading: 'بنیادی تفہیم و تشریح', content: 'کوئی تحریری مواد دستیاب نہیں ہے۔' }],
+        sections: [{ heading: '', content: 'کوئی تحریری مواد دستیاب نہیں ہے۔' }],
       },
     ];
   }
@@ -803,8 +772,6 @@ export function partitionManuscriptThematically(
     chapterBuckets[bucketIdx].push(para);
   });
 
-  const usedTitles = new Set<string>();
-
   const chapters: SemanticChapter[] = chapterBuckets
     .filter((b) => b.length > 0)
     .map((bucket, cIdx) => {
@@ -813,8 +780,8 @@ export function partitionManuscriptThematically(
 
       const sections: SemanticSection[] = [];
       if (bucket.length <= 2) {
-        bucket.forEach((para, sIdx) => {
-          const heading = deriveThematicHeading(para, `علمی نکتہ ${sIdx + 1}: تفہیم و اطلاق`);
+        bucket.forEach((para) => {
+          const heading = deriveThematicHeading(para, '');
           sections.push({
             heading,
             content: para,
@@ -828,7 +795,7 @@ export function partitionManuscriptThematically(
           const secParas = bucket.slice(s * parasPerSec, (s + 1) * parasPerSec);
           if (secParas.length > 0) {
             const secContent = secParas.join('\n\n');
-            const heading = deriveThematicHeading(secParas[0], `فکری مبحث ${s + 1}: تفصیلی جائزہ`);
+            const heading = deriveThematicHeading(secParas[0], '');
             sections.push({
               heading,
               content: secContent,
@@ -838,20 +805,14 @@ export function partitionManuscriptThematically(
       }
 
       const chapterTitleSnippet = bucket[0] || '';
-      let derivedTitle = deriveThematicHeading(chapterTitleSnippet, `فکری و عملی مباحث`);
-      
-      if (usedTitles.has(derivedTitle)) {
-        derivedTitle = `${derivedTitle} (حصہ ${chNumber})`;
-      }
-      usedTitles.add(derivedTitle);
-
-      const chapterTitle = `باب ${chNumber}: ${derivedTitle}`;
+      let derivedTitle = deriveThematicHeading(chapterTitleSnippet, '');
+      const chapterTitle = derivedTitle ? `باب ${chNumber}: ${derivedTitle}` : `باب ${chNumber}`;
 
       return {
         id: `chap-${chNumber}`,
         title: chapterTitle,
         summary: '',
-        sections: sections.length > 0 ? sections : [{ heading: 'بنیادی تفہیم و تشریح', content: combinedChapterText }],
+        sections: sections.length > 0 ? sections : [{ heading: '', content: combinedChapterText }],
       };
     });
 

@@ -39,6 +39,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
   const handleUpdateChapterTitle = (index: number, newTitle: string) => {
     setChapters((prev) => {
       const updated = [...prev];
+      if (!updated[index]) return prev;
       updated[index] = { ...updated[index], title: newTitle };
       return updated;
     });
@@ -47,12 +48,15 @@ export const BookEditor: React.FC<BookEditorProps> = ({
   const handleUpdateSectionContent = (chapIndex: number, secIndex: number, newContent: string) => {
     setChapters((prev) => {
       const updated = [...prev];
+      if (!updated[chapIndex]) return prev;
       const chap = { ...updated[chapIndex] };
-      if (chap.sections) {
-        const sections = [...chap.sections];
+      const sections = Array.isArray(chap.sections) ? [...chap.sections] : [];
+      if (!sections[secIndex]) {
+        sections[secIndex] = { heading: `عنوان ${secIndex + 1}`, content: newContent };
+      } else {
         sections[secIndex] = { ...sections[secIndex], content: newContent };
-        chap.sections = sections;
       }
+      chap.sections = sections;
       updated[chapIndex] = chap;
       return updated;
     });
@@ -61,12 +65,15 @@ export const BookEditor: React.FC<BookEditorProps> = ({
   const handleUpdateSectionHeading = (chapIndex: number, secIndex: number, newHeading: string) => {
     setChapters((prev) => {
       const updated = [...prev];
+      if (!updated[chapIndex]) return prev;
       const chap = { ...updated[chapIndex] };
-      if (chap.sections) {
-        const sections = [...chap.sections];
+      const sections = Array.isArray(chap.sections) ? [...chap.sections] : [];
+      if (!sections[secIndex]) {
+        sections[secIndex] = { heading: newHeading, content: '' };
+      } else {
         sections[secIndex] = { ...sections[secIndex], heading: newHeading };
-        chap.sections = sections;
       }
+      chap.sections = sections;
       updated[chapIndex] = chap;
       return updated;
     });
