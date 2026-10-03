@@ -31,9 +31,23 @@ export interface AttachedFile {
   content?: string;
 }
 
+export interface StyleOverrides {
+  fontFamily?: string;
+  fontSize?: number;
+  fontWeight?: 'bold' | 'normal' | '';
+  fontStyle?: 'italic' | 'normal' | '';
+  textDecoration?: 'underline' | 'none' | '';
+  alignment?: 'right' | 'center' | 'left' | 'justify';
+  spacing?: number; // custom margin/spacing
+  positionOffset?: number; // manual up/down adjustment
+  pageBreakBefore?: boolean;
+}
+
 export interface ChapterSection {
   heading: string;
   content: string;
+  headingStyles?: StyleOverrides;
+  contentStyles?: StyleOverrides;
 }
 
 export interface ChapterOutline {
@@ -42,6 +56,7 @@ export interface ChapterOutline {
   summary?: string;
   subheadings: string[];
   sections?: ChapterSection[];
+  titleStyles?: StyleOverrides;
 }
 
 export interface TOCItem {
@@ -85,6 +100,8 @@ export interface BookPdfParams {
   prefaceNote: string;
   conclusionNote: string;
   chapters: ChapterOutline[];
+  prefaceStyles?: StyleOverrides;
+  conclusionStyles?: StyleOverrides;
   rawText?: string;
   generatedBook?: GeneratedBookData | null;
   bodyFontSize?: number;

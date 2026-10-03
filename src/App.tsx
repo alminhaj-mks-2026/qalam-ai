@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Language, InputMode, BookGenre, AttachedFile, ChapterOutline, GeneratedBookData, CoverPageConfig } from './types';
+import { Language, InputMode, BookGenre, AttachedFile, ChapterOutline, GeneratedBookData, CoverPageConfig, StyleOverrides } from './types';
 import { translations } from './i18n/translations';
 import { Header } from './components/Header';
 import { Hero } from './components/Hero';
@@ -39,6 +39,10 @@ export default function App() {
   const [pageSize, setPageSize] = useState<'A4' | 'A5' | 'Letter' | 'B5'>('A4');
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [autoLayout, setAutoLayout] = useState<boolean>(true);
+
+  // Manual style overrides states
+  const [prefaceStyles, setPrefaceStyles] = useState<StyleOverrides>({});
+  const [conclusionStyles, setConclusionStyles] = useState<StyleOverrides>({});
 
   // Customizable Professional Cover Page State
   const [coverConfig, setCoverConfig] = useState<CoverPageConfig>({
@@ -161,6 +165,8 @@ export default function App() {
           prefaceNote,
           conclusionNote,
           chapters,
+          prefaceStyles,
+          conclusionStyles,
           rawText,
           generatedBook,
           bodyFontSize,
@@ -172,7 +178,7 @@ export default function App() {
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [title, subtitle, authorName, chapters, coverConfig, pageSize, orientation, bodyFontSize, isFullBookViewOpen]);
+  }, [title, subtitle, authorName, chapters, coverConfig, pageSize, orientation, bodyFontSize, isFullBookViewOpen, prefaceStyles, conclusionStyles]);
 
   /**
    * Seamlessly re-attaches to a running or completed background job
@@ -512,6 +518,8 @@ export default function App() {
         prefaceNote,
         conclusionNote,
         chapters,
+        prefaceStyles,
+        conclusionStyles,
         rawText,
         generatedBook,
         bodyFontSize,
@@ -552,6 +560,8 @@ export default function App() {
         prefaceNote,
         conclusionNote,
         chapters,
+        prefaceStyles,
+        conclusionStyles,
         rawText,
         generatedBook,
         bodyFontSize,
@@ -717,6 +727,20 @@ export default function App() {
             setIsEditorOpen(false);
             setIsFullBookViewOpen(true);
           }}
+          prefaceStyles={prefaceStyles}
+          setPrefaceStyles={setPrefaceStyles}
+          conclusionStyles={conclusionStyles}
+          setConclusionStyles={setConclusionStyles}
+          pageSize={pageSize}
+          setPageSize={setPageSize}
+          orientation={orientation}
+          setOrientation={setOrientation}
+          autoLayout={autoLayout}
+          setAutoLayout={setAutoLayout}
+          bodyFontSize={bodyFontSize}
+          setBodyFontSize={setBodyFontSize}
+          coverConfig={coverConfig}
+          setCoverConfig={setCoverConfig}
         />
       )}
 
@@ -735,6 +759,8 @@ export default function App() {
           prefaceNote={prefaceNote}
           conclusionNote={conclusionNote}
           chapters={chapters}
+          prefaceStyles={prefaceStyles}
+          conclusionStyles={conclusionStyles}
           bodyFontSize={bodyFontSize}
           setBodyFontSize={setBodyFontSize}
           pageSize={pageSize}

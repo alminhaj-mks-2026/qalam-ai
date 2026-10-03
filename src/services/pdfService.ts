@@ -1,4 +1,4 @@
-import { ChapterOutline, GeneratedBookData, CoverPageConfig, BookPdfParams } from '../types';
+import { ChapterOutline, GeneratedBookData, CoverPageConfig, BookPdfParams, StyleOverrides } from '../types';
 import { sanitizeBookHeading, cleanFinalBookContent } from './manuscriptCleaner';
 import { formatScriptAwareHtml } from './scriptTypography';
 
@@ -11,6 +11,50 @@ interface PdfCache {
 
 let pdfBlobCache: PdfCache | null = null;
 
+function serializeStyles(s?: StyleOverrides): string {
+  if (!s) return '';
+  return `${s.fontFamily || ''}_${s.fontSize || ''}_${s.fontWeight || ''}_${s.fontStyle || ''}_${s.textDecoration || ''}_${s.alignment || ''}_${s.spacing || ''}_${s.positionOffset || ''}_${s.pageBreakBefore ? 't' : 'f'}`;
+}
+
+function getStyleHtmlString(styles?: StyleOverrides): string {
+  if (!styles) return '';
+  const parts: string[] = [];
+  if (styles.fontFamily) {
+    parts.push(`font-family: ${styles.fontFamily}`);
+  }
+  if (styles.fontSize) {
+    parts.push(`font-size: ${styles.fontSize}px`);
+  }
+  if (styles.fontWeight) {
+    parts.push(`font-weight: ${styles.fontWeight}`);
+  }
+  if (styles.fontStyle) {
+    parts.push(`font-style: ${styles.fontStyle}`);
+  }
+  if (styles.textDecoration) {
+    parts.push(`text-decoration: ${styles.textDecoration}`);
+  }
+  if (styles.alignment) {
+    parts.push(`text-align: ${styles.alignment}`);
+    if (styles.alignment === 'justify') {
+      parts.push(`text-align-last: justify`);
+    } else {
+      parts.push(`text-align-last: ${styles.alignment}`);
+    }
+  }
+  if (styles.spacing !== undefined) {
+    parts.push(`margin-bottom: ${styles.spacing}px`);
+  }
+  if (styles.positionOffset !== undefined && styles.positionOffset !== 0) {
+    parts.push(`transform: translateY(${styles.positionOffset}px)`);
+  }
+  if (styles.pageBreakBefore) {
+    parts.push(`page-break-before: always`);
+    parts.push(`break-before: page`);
+  }
+  return parts.length > 0 ? `style="${parts.join('; ')}"` : '';
+}
+
 /**
  * Computes a fast deterministic string hash signature for the book parameters & cover configuration.
  */
@@ -18,7 +62,7 @@ function computeBookHash(params: BookPdfParams): string {
   const chapterSig = (params.chapters || [])
     .map(
       (c) =>
-        `${c.title}:${c.sections?.map((s) => s.heading + ':' + s.content).join(',')}`
+        `${c.title}:${serializeStyles(c.titleStyles)}:${c.sections?.map((s) => `${s.heading}:${serializeStyles(s.headingStyles)}:${s.content}:${serializeStyles(s.contentStyles)}`).join(',')}`
     )
     .join('|');
 
@@ -26,7 +70,10 @@ function computeBookHash(params: BookPdfParams): string {
     ? `${params.coverConfig.title}_${params.coverConfig.subtitle}_${params.coverConfig.authorName}_${params.coverConfig.layout}_${params.coverConfig.themeColor}_${params.coverConfig.backgroundColor}_${params.coverConfig.alignment}`
     : 'default_cover';
 
-  return `${params.title}_${params.subtitle}_${params.authorName}_${chapterSig}_${params.bodyFontSize || 16}_${params.pageSize || 'A4'}_${params.orientation || 'portrait'}_${coverSig}_${params.prefaceNote || ''}_${params.conclusionNote || ''}`;
+  const prefaceSig = serializeStyles(params.prefaceStyles);
+  const conclusionSig = serializeStyles(params.conclusionStyles);
+
+  return `${params.title}_${params.subtitle}_${params.authorName}_${chapterSig}_${params.bodyFontSize || 16}_${params.pageSize || 'A4'}_${params.orientation || 'portrait'}_${coverSig}_${params.prefaceNote || ''}_${prefaceSig}_${params.conclusionNote || ''}_${conclusionSig}`;
 }
 
 function removeRepeatedHeading(contentStr: string, headingToCompare: string): string {
@@ -481,7 +528,7 @@ export async function createBookPdfBlob(
   <div class="book-content-flow">
     <!-- Preface -->
     ${params.prefaceNote && params.prefaceNote.trim() ? `
-      <div class="chapter-block">
+      <div class="chapter-block" ${getStyleHtmlString(params.prefaceStyles)}>
         <div class="chapter-badge">پیش لفظ</div>
         <div class="chapter-title">دیباچہ و تعارفِ کتاب</div>
         <div class="body-text">
@@ -500,7 +547,7 @@ export async function createBookPdfBlob(
       return `
         <div class="chapter-block" id="chap-${cIdx + 1}">
           <div class="chapter-badge">باب ${cIdx + 1}</div>
-          <div class="chapter-title">${cleanChapterTitle}</div>
+          <div class="chapter-title" ${getStyleHtmlString(ch.titleStyles)}>${cleanChapterTitle}</div>
           ${ch.summary ? `<div class="summary-box"><strong>خلاصۂ باب: </strong>${ch.summary}</div>` : ''}
           ${rawSections.map((sec) => {
             const cleanSecHeading = sanitizeBookHeading(sec.heading || '', '');
@@ -515,8 +562,8 @@ export async function createBookPdfBlob(
             if (ch.title) cleanContent = removeRepeatedHeading(cleanContent, ch.title);
 
             return `
-              ${sec.heading && !isRedundant ? `<div class="section-title">${sec.heading}</div>` : ''}
-              <div class="body-text">
+              ${sec.heading && !isRedundant ? `<div class="section-title" ${getStyleHtmlString(sec.headingStyles)}>${sec.heading}</div>` : ''}
+              <div class="body-text" ${getStyleHtmlString(sec.contentStyles)}>
                 ${formatParagraphsForPdf(cleanContent)}
               </div>
             `;
@@ -527,7 +574,7 @@ export async function createBookPdfBlob(
 
     <!-- Conclusion -->
     ${params.conclusionNote && params.conclusionNote.trim() ? `
-      <div class="chapter-block">
+      <div class="chapter-block" ${getStyleHtmlString(params.conclusionStyles)}>
         <div class="chapter-badge">اختتامیہ</div>
         <div class="chapter-title">حاصلِ کلام و تجاویز</div>
         <div class="body-text">

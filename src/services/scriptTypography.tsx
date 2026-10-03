@@ -119,6 +119,11 @@ export function formatScriptAwareHtml(contentStr: string): string {
 
   return paragraphs
     .map((para) => {
+      const hasHtml = /<[a-z][\s\S]*>/i.test(para);
+      if (hasHtml) {
+        return `<p class="body-p urdu-para font-urdu" dir="rtl">${para}</p>`;
+      }
+
       // 1. Pure English paragraph
       if (isPureEnglish(para)) {
         return `<p class="body-p english-para font-english" dir="ltr">${para}</p>`;
@@ -167,6 +172,24 @@ export function renderScriptAwareReactParagraphs(
   return (
     <div className="book-body-text space-y-3">
       {paragraphs.map((para, pIdx) => {
+        const hasHtml = /<[a-z][\s\S]*>/i.test(para);
+        if (hasHtml) {
+          return (
+            <p
+              key={pIdx}
+              dir="rtl"
+              style={{
+                fontSize: `${fontSize}px`,
+                lineHeight: 2.15,
+                textAlign: 'justify',
+                textAlignLast: 'right',
+              }}
+              className="text-slate-800 font-urdu px-1"
+              dangerouslySetInnerHTML={{ __html: para }}
+            />
+          );
+        }
+
         // Pure English
         if (isPureEnglish(para)) {
           return (

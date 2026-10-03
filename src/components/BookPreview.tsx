@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TranslationDictionary } from '../i18n/translations';
-import { PreviewPage, ChapterOutline, BookGenre, CoverPageConfig, CoverLayout } from '../types';
+import { PreviewPage, ChapterOutline, BookGenre, CoverPageConfig, CoverLayout, StyleOverrides } from '../types';
 import { QuotaErrorInfo } from './Workspace';
 import { SupportedGeminiModel } from '../config/models';
 import { renderScriptAwareReactParagraphs } from '../services/scriptTypography';
@@ -50,6 +50,8 @@ interface BookPreviewProps {
   prefaceNote: string;
   conclusionNote: string;
   chapters: ChapterOutline[];
+  prefaceStyles?: StyleOverrides;
+  conclusionStyles?: StyleOverrides;
   bodyFontSize?: number;
   setBodyFontSize?: (size: number) => void;
   pageSize?: 'A4' | 'A5' | 'Letter' | 'B5';
@@ -86,6 +88,8 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
   prefaceNote,
   conclusionNote,
   chapters,
+  prefaceStyles,
+  conclusionStyles,
   bodyFontSize: externalBodyFontSize,
   setBodyFontSize: externalSetBodyFontSize,
   pageSize: externalPageSize,
@@ -113,6 +117,17 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
   const [isFullScreen, setIsFullScreen] = useState<boolean>(isOpenModal);
   const [isTypographyOpen, setIsTypographyOpen] = useState<boolean>(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<'title' | 'cover' | 'layout'>('title');
+  const [isTocPanelOpen, setIsTocPanelOpen] = useState<boolean>(false);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 640);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const removeRepeatedHeading = (contentStr: string, headingToCompare: string): string => {
     if (!contentStr || !headingToCompare) return contentStr;
@@ -126,6 +141,36 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
     } catch (e) {
       return contentStr;
     }
+  };
+
+  const getStyleCss = (styles?: StyleOverrides): React.CSSProperties => {
+    if (!styles) return {};
+    const s: React.CSSProperties = {};
+    if (styles.fontFamily) {
+      s.fontFamily = styles.fontFamily;
+    }
+    if (styles.fontSize) {
+      s.fontSize = `${styles.fontSize}px`;
+    }
+    if (styles.fontWeight) {
+      s.fontWeight = styles.fontWeight;
+    }
+    if (styles.fontStyle) {
+      s.fontStyle = styles.fontStyle;
+    }
+    if (styles.textDecoration) {
+      s.textDecoration = styles.textDecoration;
+    }
+    if (styles.alignment) {
+      s.textAlign = styles.alignment;
+    }
+    if (styles.spacing !== undefined) {
+      s.marginBottom = `${styles.spacing}px`;
+    }
+    if (styles.positionOffset !== undefined) {
+      s.transform = `translateY(${styles.positionOffset}px)`;
+    }
+    return s;
   };
 
   // Local state fallbacks if external setters aren't provided
@@ -225,26 +270,26 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
   };
 
   const renderPageContent = () => {
-    const showWatermark = coverConfig.showWatermark !== false;
+    const showWatermark = coverConfig?.showWatermark !== false;
 
     if (currentPage === 'cover') {
       const textAlignClass =
-        coverConfig.alignment === 'right' ? 'text-right' : coverConfig.alignment === 'left' ? 'text-left' : 'text-center';
+        coverConfig?.alignment === 'right' ? 'text-right' : coverConfig?.alignment === 'left' ? 'text-left' : 'text-center';
 
       return (
         <div
-          style={{ backgroundColor: coverConfig.backgroundColor || '#0F172A' }}
+          style={{ backgroundColor: coverConfig?.backgroundColor || '#0F172A' }}
           className={`${getContainerSizeClasses()} text-slate-100 rounded-2xl p-4 sm:p-5 flex flex-col justify-between relative overflow-hidden book-shadow transition-all duration-300`}
         >
           {/* Ornamental Double Inner Frame */}
-          {coverConfig.showFrameBorder !== false && (
+          {coverConfig?.showFrameBorder !== false && (
             <>
               <div
-                style={{ borderColor: `${coverConfig.themeColor || '#D4AF37'}90` }}
+                style={{ borderColor: `${coverConfig?.themeColor || '#D4AF37'}90` }}
                 className="absolute inset-3 border-2 pointer-events-none rounded-xl"
               />
               <div
-                style={{ borderColor: `${coverConfig.themeColor || '#D4AF37'}40` }}
+                style={{ borderColor: `${coverConfig?.themeColor || '#D4AF37'}40` }}
                 className="absolute inset-4 sm:inset-5 border pointer-events-none rounded-lg"
               />
             </>
@@ -253,10 +298,10 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
           <div className="w-full h-full p-4 sm:p-8 flex flex-col justify-between relative z-10">
             <div className={`${textAlignClass} pt-4 space-y-4`}>
               {/* Logo Image or Icon */}
-              {coverConfig.logoUrl ? (
+              {coverConfig?.logoUrl ? (
                 <div className="flex items-center justify-center mb-2">
                   <img
-                    src={coverConfig.logoUrl}
+                    src={coverConfig?.logoUrl}
                     alt="Book Logo"
                     className="max-h-16 max-w-[120px] object-contain rounded-lg border border-white/20 shadow-sm"
                   />
@@ -264,9 +309,9 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
               ) : (
                 <div
                   style={{
-                    backgroundColor: `${coverConfig.themeColor || '#D4AF37'}20`,
-                    borderColor: coverConfig.themeColor || '#D4AF37',
-                    color: coverConfig.themeColor || '#D4AF37',
+                    backgroundColor: `${coverConfig?.themeColor || '#D4AF37'}20`,
+                    borderColor: coverConfig?.themeColor || '#D4AF37',
+                    color: coverConfig?.themeColor || '#D4AF37',
                   }}
                   className="w-12 h-12 sm:w-14 sm:h-14 mx-auto rounded-full border flex items-center justify-center mb-3 shadow-sm"
                 >
@@ -276,10 +321,10 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
 
               {showWatermark && (
                 <span
-                  style={{ color: coverConfig.themeColor || '#D4AF37' }}
+                  style={{ color: coverConfig?.themeColor || '#D4AF37' }}
                   className="text-[10px] sm:text-xs uppercase font-brand tracking-widest block font-bold"
                 >
-                  {coverConfig.additionalText || 'Qalam AI Edition'}
+                  {coverConfig?.additionalText || 'Qalam AI Edition'}
                 </span>
               )}
 
@@ -291,7 +336,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
               </h1>
 
               <p
-                style={{ color: `${coverConfig.themeColor || '#D4AF37'}DD` }}
+                style={{ color: `${coverConfig?.themeColor || '#D4AF37'}DD` }}
                 className="text-xs sm:text-base font-urdu leading-relaxed max-w-md mx-auto"
               >
                 {displaySubtitle}
@@ -301,20 +346,20 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
             {/* Center Ornament */}
             <div className="flex items-center justify-center my-4">
               <svg width="48" height="44" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ opacity: 0.85 }}>
-                <circle cx="32" cy="32" r="28" stroke={coverConfig.themeColor || '#D4AF37'} strokeWidth="1" strokeDasharray="3 3"/>
-                <circle cx="32" cy="32" r="20" stroke={coverConfig.themeColor || '#D4AF37'} strokeWidth="1.2"/>
-                <rect x="23.5" y="23.5" width="17" height="17" transform="rotate(45 32 32)" stroke={coverConfig.themeColor || '#D4AF37'} strokeWidth="1"/>
-                <rect x="23.5" y="23.5" width="17" height="17" stroke={coverConfig.themeColor || '#D4AF37'} strokeWidth="1"/>
-                <circle cx="32" cy="32" r="3.5" fill={coverConfig.themeColor || '#D4AF37'}/>
+                <circle cx="32" cy="32" r="28" stroke={coverConfig?.themeColor || '#D4AF37'} strokeWidth="1" strokeDasharray="3 3"/>
+                <circle cx="32" cy="32" r="20" stroke={coverConfig?.themeColor || '#D4AF37'} strokeWidth="1.2"/>
+                <rect x="23.5" y="23.5" width="17" height="17" transform="rotate(45 32 32)" stroke={coverConfig?.themeColor || '#D4AF37'} strokeWidth="1"/>
+                <rect x="23.5" y="23.5" width="17" height="17" stroke={coverConfig?.themeColor || '#D4AF37'} strokeWidth="1"/>
+                <circle cx="32" cy="32" r="3.5" fill={coverConfig?.themeColor || '#D4AF37'}/>
               </svg>
             </div>
 
             <div
-              style={{ borderColor: `${coverConfig.themeColor || '#D4AF37'}40` }}
+              style={{ borderColor: `${coverConfig?.themeColor || '#D4AF37'}40` }}
               className={`${textAlignClass} pb-2 space-y-1 relative border-t pt-4`}
             >
               <p
-                style={{ color: coverConfig.themeColor || '#D4AF37' }}
+                style={{ color: coverConfig?.themeColor || '#D4AF37' }}
                 className="text-[11px] font-brand uppercase tracking-wider"
               >
                 مصنّف
@@ -364,7 +409,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
               </div>
 
               {prefaceNote && (
-                <div className="mt-4 p-3.5 bg-amber-50/70 border border-amber-200/90 rounded-xl text-slate-800 leading-relaxed text-right rtl:text-right ltr:text-left shadow-2xs">
+                <div style={getStyleCss(prefaceStyles)} className="mt-4 p-3.5 bg-amber-50/70 border border-amber-200/90 rounded-xl text-slate-800 leading-relaxed text-right rtl:text-right ltr:text-left shadow-2xs animate-fade-in">
                   <strong style={{ fontSize: `${subheadingFontSize}px` }} className="block text-[#0F172A] font-bold mb-1.5">
                     دیباچہ و پیش لفظ:
                   </strong>
@@ -491,7 +536,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                   باب {chIdx + 1}
                 </span>
                 <h3
-                  style={{ fontSize: `${chapterHeadingFontSize}px` }}
+                  style={{ fontSize: `${chapterHeadingFontSize}px`, ...getStyleCss(currentChap?.titleStyles) }}
                   className="font-bold font-urdu text-[#0F172A] leading-snug"
                 >
                   {currentChap?.title || `باب ${chIdx + 1}`}
@@ -525,10 +570,10 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                     }
 
                     return (
-                      <div key={sIdx} className="space-y-1.5 border-b border-slate-200/80 pb-2.5 last:border-b-0">
+                      <div key={sIdx} style={getStyleCss(sec.contentStyles)} className="space-y-1.5 border-b border-slate-200/80 pb-2.5 last:border-b-0">
                         {sec.heading && !isRedundant && (
                           <h4
-                            style={{ fontSize: `${sectionHeadingFontSize}px` }}
+                            style={{ fontSize: `${sectionHeadingFontSize}px`, ...getStyleCss(sec.headingStyles) }}
                             className="font-bold text-[#0F172A] bg-slate-100/90 px-3 py-1.5 rounded-lg border-r-4 rtl:border-r-4 rtl:border-l-0 border-[#D4AF37]"
                           >
                             {sec.heading}
@@ -592,7 +637,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                 <p className="text-xs font-urdu text-slate-500">حاصلِ مطالعہ و سفارشات</p>
               </div>
 
-              <div className="font-urdu leading-relaxed text-slate-800 space-y-3">
+              <div style={getStyleCss(conclusionStyles)} className="font-urdu leading-relaxed text-slate-800 space-y-3 animate-fade-in">
                 <div className="bg-white p-4 rounded-xl border border-slate-200 text-slate-800 shadow-2xs">
                   {renderBookParagraphs(
                     conclusionNote || 'اس کتاب کے تمام ابواب کا مطالعہ کرنے کے بعد یہ بات واضح ہو جاتی ہے کہ منظم انداز میں پیش کیا گیا مواد قاری کی سوچ میں حقیقی تبدیلی لاتا ہے۔',
@@ -684,6 +729,18 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
 
       {/* Typography / Book Settings Popup Trigger Button & Modal */}
       <div className="flex items-center gap-2 relative">
+        <button
+          onClick={() => setIsTocPanelOpen(!isTocPanelOpen)}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all cursor-pointer font-bold ${
+            isTocPanelOpen
+              ? 'bg-[#D4AF37] text-[#0F172A] border-[#D4AF37] shadow-md'
+              : 'bg-slate-800 text-[#D4AF37] border-slate-700 hover:bg-slate-700'
+          }`}
+          title="فہرستِ مضامین کھولیں یا بند کریں"
+        >
+          <Book className="w-4 h-4" />
+          <span>📖 فہرست</span>
+        </button>
         <div className="relative">
           <button
             onClick={() => setIsTypographyOpen(!isTypographyOpen)}
@@ -1317,23 +1374,84 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
         )}
 
         {/* Page Spread Display Area */}
-        <div className="flex-1 overflow-y-auto flex items-center justify-between py-2 px-1 relative">
+        <div className="flex-1 overflow-y-auto flex flex-col sm:flex-row items-center sm:items-stretch justify-between py-2 px-1 relative gap-3">
+          
+          {/* TOC Slide-over/Side Panel */}
+          {isTocPanelOpen && (
+            <div className="absolute inset-2 sm:relative sm:inset-auto z-30 w-auto sm:w-72 bg-[#0F172A] border border-[#D4AF37]/50 rounded-2xl p-4 flex flex-col justify-between font-urdu shadow-2xl shrink-0 overflow-y-auto animate-fade-in">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-1.5 text-[#D4AF37] font-bold text-sm">
+                    <Book className="w-4 h-4" />
+                    <span>فہرستِ مضامین</span>
+                  </div>
+                  <button
+                    onClick={() => setIsTocPanelOpen(false)}
+                    className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-all cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-1 max-h-[60vh] overflow-y-auto pr-1">
+                  {pageOrder.map((pg, pIdx) => {
+                    let pageLabel = '';
+                    if (pg === 'cover') pageLabel = 'سرورق (Cover)';
+                    else if (pg === 'title_page') pageLabel = 'پیش لفظ (Preface)';
+                    else if (pg === 'toc') pageLabel = 'فہرست مضامین (TOC)';
+                    else if (pg === 'conclusion') pageLabel = 'اختتامیہ (Conclusion)';
+                    else if (pg.startsWith('chapter_')) {
+                      const chIdx = parseInt(pg.replace('chapter_', ''), 10) - 1;
+                      pageLabel = chapters?.[chIdx]?.title || `باب ${chIdx + 1}`;
+                    }
+
+                    return (
+                      <button
+                        key={pg}
+                        onClick={() => {
+                          setCurrentPage(pg);
+                          if (isMobile) {
+                            setIsTocPanelOpen(false); // Auto close on mobile
+                          }
+                        }}
+                        className={`w-full text-right px-3 py-2 text-xs rounded-xl font-bold transition-all flex items-center justify-between cursor-pointer ${
+                          currentPage === pg
+                            ? 'bg-[#D4AF37] text-[#0F172A] shadow-md animate-pulse'
+                            : 'text-slate-300 hover:bg-slate-800/80'
+                        }`}
+                      >
+                        <span className="truncate max-w-[170px]">{pageLabel}</span>
+                        <span className="text-[10px] opacity-80 font-mono">
+                          {toUrduDigits(pIdx + 1)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="text-center pt-2 text-[10px] text-slate-400 border-t border-slate-800 mt-3 shrink-0">
+                کل صفحات: {toUrduDigits(pageOrder.length)}
+              </div>
+            </div>
+          )}
+
           {/* Elegant Left Page Click Zone */}
           {currentIdx > 0 ? (
             <div 
               onClick={handlePrevPage}
-              className="w-12 sm:w-20 shrink-0 self-stretch flex items-center justify-center cursor-pointer text-slate-400/30 hover:text-[#D4AF37] hover:bg-white/5 rounded-xl transition-all"
+              className="hidden sm:flex w-12 shrink-0 self-stretch items-center justify-center cursor-pointer text-slate-400/30 hover:text-[#D4AF37] hover:bg-white/5 rounded-xl transition-all"
               title="پچھلا صفحہ"
             >
               <ChevronRight className="w-8 h-8 rotate-180" />
             </div>
           ) : (
-            <div className="w-12 sm:w-20 shrink-0 self-stretch" />
+            <div className="hidden sm:w-12 sm:block shrink-0 self-stretch" />
           )}
 
           <div
             style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'center center' }}
-            className="flex-1 flex justify-center transition-transform duration-200 z-10 mx-2"
+            className="flex-1 flex justify-center transition-transform duration-200 z-10 mx-2 overflow-x-auto max-w-full"
           >
             {renderPageContent()}
           </div>
@@ -1342,13 +1460,13 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
           {currentIdx < pageOrder.length - 1 ? (
             <div 
               onClick={handleNextPage}
-              className="w-12 sm:w-20 shrink-0 self-stretch flex items-center justify-center cursor-pointer text-slate-400/30 hover:text-[#D4AF37] hover:bg-white/5 rounded-xl transition-all"
+              className="hidden sm:flex w-12 shrink-0 self-stretch items-center justify-center cursor-pointer text-slate-400/30 hover:text-[#D4AF37] hover:bg-white/5 rounded-xl transition-all"
               title="اگلا صفحہ"
             >
               <ChevronLeft className="w-8 h-8 rotate-180" />
             </div>
           ) : (
-            <div className="w-12 sm:w-20 shrink-0 self-stretch" />
+            <div className="hidden sm:w-12 sm:block shrink-0 self-stretch" />
           )}
         </div>
 
