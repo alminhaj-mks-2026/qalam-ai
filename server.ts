@@ -30,6 +30,7 @@ app.use(express.json({ limit: '20mb' }));
 let cachedNastaliqFontBase64 = '';
 let cachedNaskhFontBase64 = '';
 let cachedAmiriFontBase64 = '';
+let cachedLatinFontBase64 = '';
 
 function getLocalFontBase64(relPath: string): string {
   try {
@@ -53,6 +54,9 @@ function getEmbeddedFontStyles(): string {
   if (!cachedAmiriFontBase64) {
     cachedAmiriFontBase64 = getLocalFontBase64('node_modules/@fontsource/amiri/files/amiri-arabic-400-normal.woff2');
   }
+  if (!cachedLatinFontBase64) {
+    cachedLatinFontBase64 = getLocalFontBase64('node_modules/@fontsource/plus-jakarta-sans/files/plus-jakarta-sans-latin-400-normal.woff2');
+  }
 
   return `
     @font-face {
@@ -70,6 +74,12 @@ function getEmbeddedFontStyles(): string {
     @font-face {
       font-family: 'Amiri';
       src: ${cachedAmiriFontBase64 ? `url('${cachedAmiriFontBase64}') format('woff2')` : 'local("Amiri"), serif'};
+      font-weight: 400;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: 'Plus Jakarta Sans';
+      src: ${cachedLatinFontBase64 ? `url('${cachedLatinFontBase64}') format('woff2')` : 'local("Plus Jakarta Sans"), sans-serif'};
       font-weight: 400;
       font-style: normal;
     }

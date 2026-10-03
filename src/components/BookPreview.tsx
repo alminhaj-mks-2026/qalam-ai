@@ -3,6 +3,7 @@ import { TranslationDictionary } from '../i18n/translations';
 import { PreviewPage, ChapterOutline, BookGenre, CoverPageConfig, CoverLayout } from '../types';
 import { QuotaErrorInfo } from './Workspace';
 import { SupportedGeminiModel } from '../config/models';
+import { renderScriptAwareReactParagraphs } from '../services/scriptTypography';
 import {
   BookOpen,
   ChevronRight,
@@ -213,27 +214,9 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
     }
   };
 
-  // Helper to render formatted book paragraphs with CSS indentation and clean breaks
+  // Helper to render formatted book paragraphs with script-aware fonts and clean breaks
   const renderBookParagraphs = (contentStr: string, fontSize: number) => {
-    if (!contentStr || typeof contentStr !== 'string') return null;
-    const paragraphs = contentStr
-      .split(/\n\s*\n|\n/)
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
-
-    return (
-      <div className="book-body-text space-y-2.5">
-        {paragraphs.map((para, idx) => (
-          <p
-            key={idx}
-            style={{ fontSize: `${fontSize}px`, lineHeight: 2.15, textAlign: 'justify', textAlignLast: 'right' }}
-            className="text-slate-800 font-urdu px-1"
-          >
-            {para}
-          </p>
-        ))}
-      </div>
-    );
+    return renderScriptAwareReactParagraphs(contentStr, fontSize);
   };
 
   const toUrduDigits = (num: number): string => {
@@ -559,12 +542,9 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
               ) : (
                 <div className="font-urdu leading-relaxed text-slate-800 space-y-3">
                   {rawText ? (
-                    <p
-                      style={{ fontSize: `${effectiveFontSize}px`, lineHeight: 2.1 }}
-                      className="bg-white p-4 rounded-xl border border-slate-200 text-slate-800 book-body-text shadow-2xs"
-                    >
-                      {rawText.slice(chIdx * 450, (chIdx + 1) * 450) || rawText.slice(0, 450)}
-                    </p>
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 text-slate-800 shadow-2xs">
+                      {renderBookParagraphs(rawText.slice(chIdx * 450, (chIdx + 1) * 450) || rawText.slice(0, 450), effectiveFontSize)}
+                    </div>
                   ) : (
                     <p style={{ fontSize: `${effectiveFontSize}px` }} className="text-slate-600 font-urdu">
                       اس باب میں فراہم کردہ تحریر اور ذیلی عنوانات کی تفصیلی تحقیق اور نگارش پیش کی گئی ہے۔
@@ -614,14 +594,10 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
 
               <div className="font-urdu leading-relaxed text-slate-800 space-y-3">
                 <div className="bg-white p-4 rounded-xl border border-slate-200 text-slate-800 shadow-2xs">
-                  <p
-                    style={{ fontSize: `${effectiveFontSize}px`, lineHeight: 2.1 }}
-                    className="book-body-text"
-                  >
-                    {conclusionNote
-                      ? conclusionNote
-                      : 'اس کتاب کے تمام ابواب کا مطالعہ کرنے کے بعد یہ بات واضح ہو جاتی ہے کہ منظم انداز میں پیش کیا گیا مواد قاری کی سوچ میں حقیقی تبدیلی لاتا ہے۔'}
-                  </p>
+                  {renderBookParagraphs(
+                    conclusionNote || 'اس کتاب کے تمام ابواب کا مطالعہ کرنے کے بعد یہ بات واضح ہو جاتی ہے کہ منظم انداز میں پیش کیا گیا مواد قاری کی سوچ میں حقیقی تبدیلی لاتا ہے۔',
+                    effectiveFontSize
+                  )}
                 </div>
 
                 <p className="text-slate-600 text-xs sm:text-sm text-center pt-1 font-urdu">

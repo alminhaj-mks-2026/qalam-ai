@@ -46,7 +46,7 @@
 
 /* Mixed Language & Typography Balance */
 .book-body-text, .body-text {
-  font-family: 'Noto Naskh Arabic', 'Noto Nastaliq Urdu', 'Amiri', 'Plus Jakarta Sans', serif;
+  font-family: 'Noto Nastaliq Urdu', 'Noto Naskh Arabic', 'Amiri', 'Plus Jakarta Sans', serif;
   text-align: justify;
   text-justify: inter-word;
   word-break: break-word;
@@ -55,16 +55,48 @@
 
 /* Book Paragraph Indentation (کتابی پیراگراف انڈینٹیشن) */
 .book-body-text p {
-  text-indent: 1.8em;
+  text-indent: 1.6em;
   margin-top: 0;
-  margin-bottom: 0.8rem;
-  /* Improve justification for Arabic/Urdu */
-  text-justify: inter-ideograph;
-  text-align-last: justify;
+  margin-bottom: 0.65rem;
+  line-height: 2.15;
+  text-align: justify;
+  text-justify: inter-word;
+  text-align-last: right;
 }
+
+.book-body-text p.english-para {
+  text-indent: 1.2em;
+  text-align-last: left;
+  direction: ltr;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  line-height: 1.65;
+}
+
+.book-body-text p.arabic-para {
+  text-indent: 1.2em;
+  direction: rtl;
+  font-family: 'Amiri', 'Noto Naskh Arabic', serif;
+  line-height: 2.05;
+}
+
+.inline-english {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif !important;
+  direction: ltr !important;
+  display: inline-block;
+  unicode-bidi: isolate;
+  padding: 0 2px;
+}
+
+.inline-arabic {
+  font-family: 'Amiri', 'Noto Naskh Arabic', serif !important;
+  direction: rtl !important;
+  unicode-bidi: isolate;
+  padding: 0 2px;
+}
+
 .font-english {
   text-align: justify;
-  text-indent: 1.5em;
+  text-indent: 1.2em;
   text-align-last: left;
 }
 

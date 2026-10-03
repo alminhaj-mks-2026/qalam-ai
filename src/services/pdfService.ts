@@ -1,5 +1,6 @@
 import { ChapterOutline, GeneratedBookData, CoverPageConfig, BookPdfParams } from '../types';
 import { sanitizeBookHeading, cleanFinalBookContent } from './manuscriptCleaner';
+import { formatScriptAwareHtml } from './scriptTypography';
 
 // Global PDF Blob Cache to avoid duplicate PDF builds
 interface PdfCache {
@@ -44,9 +45,7 @@ function removeRepeatedHeading(contentStr: string, headingToCompare: string): st
 
 function formatParagraphsForPdf(text: string): string {
   if (!text) return '';
-  const paras = text.split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean);
-  if (paras.length === 0) return '';
-  return paras.map((p) => `<p>${p}</p>`).join('');
+  return formatScriptAwareHtml(text);
 }
 
 /**
@@ -114,7 +113,7 @@ export async function createBookPdfBlob(
 
     @page {
       size: ${params.pageSize || 'A4'} ${params.orientation || 'portrait'};
-      margin: 14mm 12mm 14mm 12mm;
+      margin: 16mm 14mm 16mm 14mm;
     }
 
     @page :first {
@@ -135,6 +134,7 @@ export async function createBookPdfBlob(
       background-color: ${coverBg};
       color: white;
       position: relative;
+      z-index: 10;
       box-sizing: border-box;
     }
 
@@ -227,7 +227,7 @@ export async function createBookPdfBlob(
     .toc-page {
       page-break-after: always;
       break-after: page;
-      padding: 4mm 0;
+      padding: 4mm 6mm;
       box-sizing: border-box;
     }
 
@@ -237,7 +237,7 @@ export async function createBookPdfBlob(
       text-align: center;
       margin-bottom: 16px;
       color: #0f172a;
-      border-bottom: 2px solid #D4AF37;
+      border-bottom: 2px solid ${themeColor};
       padding-bottom: 6px;
       font-family: 'Noto Nastaliq Urdu', serif;
     }
@@ -267,6 +267,8 @@ export async function createBookPdfBlob(
     /* 3. Continuous Document Flow */
     .book-content-flow {
       width: 100%;
+      padding: 2mm 6mm;
+      box-sizing: border-box;
     }
 
     .chapter-block {
@@ -274,7 +276,7 @@ export async function createBookPdfBlob(
     }
 
     .chapter-badge {
-      color: #D4AF37;
+      color: ${themeColor};
       font-weight: bold;
       font-size: 13px;
       text-align: center;
@@ -286,11 +288,11 @@ export async function createBookPdfBlob(
       font-size: 22px;
       font-weight: bold;
       color: #0f172a;
-      border-bottom: 2px solid #D4AF37;
+      border-bottom: 2px solid ${themeColor};
       margin-bottom: 12px;
       padding-bottom: 6px;
       text-align: center;
-      line-height: 1.4;
+      line-height: 1.45;
       font-family: 'Noto Nastaliq Urdu', serif;
       break-after: avoid;
       page-break-after: avoid;
@@ -304,7 +306,7 @@ export async function createBookPdfBlob(
       margin-bottom: 6px;
       background: #f8fafc;
       padding: 4px 10px;
-      border-right: 4px solid #D4AF37;
+      border-right: 4px solid ${themeColor};
       border-radius: 4px;
       line-height: 1.4;
       font-family: 'Noto Nastaliq Urdu', serif;
@@ -323,53 +325,105 @@ export async function createBookPdfBlob(
       line-height: 1.8;
     }
 
+    /* Page Rectangular Frame - Left and Right Side Lines Connecting with Header & Footer */
     .pdf-page-border-outer {
       position: fixed;
-      top: -8mm;
-      bottom: -8mm;
-      left: -6mm;
-      right: -6mm;
-      border: 1.5px solid ${themeColor};
-      border-radius: 4px;
+      top: 0;
+      bottom: 0;
+      left: -5mm;
+      right: -5mm;
+      border-left: 1.5px solid #1e293b;
+      border-right: 1.5px solid #1e293b;
       pointer-events: none;
-      z-index: 9999;
+      z-index: 2;
       box-sizing: border-box;
     }
 
     .pdf-page-border-inner {
       position: fixed;
-      top: -6.5mm;
-      bottom: -6.5mm;
-      left: -4.5mm;
-      right: -4.5mm;
-      border: 0.8px solid ${themeColor}80;
-      border-radius: 2px;
+      top: 0;
+      bottom: 0;
+      left: -3.5mm;
+      right: -3.5mm;
+      border-left: 0.8px solid ${themeColor};
+      border-right: 0.8px solid ${themeColor};
       pointer-events: none;
-      z-index: 9999;
+      z-index: 2;
       box-sizing: border-box;
+    }
+
+    /* Script-Aware Typography */
+    .font-urdu {
+      font-family: 'Noto Nastaliq Urdu', 'Noto Naskh Arabic', serif;
+      line-height: 2.15;
+    }
+
+    .font-arabic {
+      font-family: 'Amiri', 'Noto Naskh Arabic', serif;
+      line-height: 2.05;
+    }
+
+    .font-english {
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+      line-height: 1.65;
     }
 
     .body-text {
       font-size: ${bodyFontSize}px;
-      text-align: justify;
-      text-justify: inter-word;
-      text-align-last: right;
       color: #334155;
       line-height: 2.15;
       word-wrap: break-word;
       overflow-wrap: break-word;
     }
 
-    .body-text p {
-      text-indent: 1.8em;
+    .body-p {
+      text-indent: 1.6em;
       margin-top: 0;
-      margin-bottom: 0.6em;
+      margin-bottom: 0.65em;
       line-height: 2.15;
       text-align: justify;
       text-justify: inter-word;
       text-align-last: right;
       orphans: 2;
       widows: 2;
+    }
+
+    .english-para {
+      text-indent: 1.2em;
+      text-align-last: left;
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+      line-height: 1.65;
+      direction: ltr;
+    }
+
+    .arabic-para {
+      text-indent: 1.2em;
+      font-family: 'Amiri', 'Noto Naskh Arabic', serif;
+      line-height: 2.05;
+      color: #1e1b4b;
+      background: #faf5ff50;
+      padding: 4px 8px;
+      border-right: 2px solid ${themeColor};
+      border-radius: 4px;
+    }
+
+    .inline-english {
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif !important;
+      display: inline-block;
+      direction: ltr !important;
+      unicode-bidi: isolate;
+      padding: 0 2px;
+      font-size: 0.92em;
+    }
+
+    .inline-arabic {
+      font-family: 'Amiri', 'Noto Naskh Arabic', serif !important;
+      direction: rtl !important;
+      unicode-bidi: isolate;
+      padding: 0 2px;
+      font-size: 1.05em;
+      color: #1e1b4b;
+      font-weight: bold;
     }
   </style>
 </head>
@@ -488,20 +542,42 @@ export async function createBookPdfBlob(
 
   // Header & Footer templates for Puppeteer
   const headerTemplate = `
-    <div style="font-family: 'Noto Nastaliq Urdu', 'Noto Naskh Arabic', sans-serif; font-size: 9px; color: #64748b; width: 100%; padding: 0 14mm; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; direction: rtl; box-sizing: border-box;">
-      <span style="color: #D4AF37; font-weight: bold;">${showWatermark ? 'Qalam AI' : ''}</span>
-      <span style="font-weight: bold; color: #0f172a;">${cleanTitle}</span>
-      <span>کتابی نسخہ</span>
+    <style>
+      * { box-sizing: border-box; }
+    </style>
+    <div style="width: 100%; height: 16mm; position: relative; font-family: 'Noto Nastaliq Urdu', 'Noto Naskh Arabic', sans-serif; direction: rtl; -webkit-print-color-adjust: exact;">
+      <!-- Outer Border Top & Sides -->
+      <div style="position: absolute; top: 6mm; bottom: 0; left: 9mm; right: 9mm; border-top: 1.5px solid #1e293b; border-left: 1.5px solid #1e293b; border-right: 1.5px solid #1e293b; border-top-left-radius: 4px; border-top-right-radius: 4px;"></div>
+      <!-- Inner Border Top & Sides -->
+      <div style="position: absolute; top: 7.5mm; bottom: 0; left: 10.5mm; right: 10.5mm; border-top: 0.8px solid ${themeColor}; border-left: 0.8px solid ${themeColor}; border-right: 0.8px solid ${themeColor}; border-top-left-radius: 2px; border-top-right-radius: 2px;"></div>
+      
+      <!-- Running Header Bar inside the frame -->
+      <div style="position: absolute; bottom: 2mm; left: 14mm; right: 14mm; display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: #64748b; border-bottom: 0.8px solid #e2e8f0; padding-bottom: 1.5mm;">
+        <span style="color: ${themeColor}; font-weight: bold;">${showWatermark ? 'Qalam AI' : ''}</span>
+        <span style="font-weight: bold; color: #0f172a;">${cleanTitle}</span>
+        <span>کتابی نسخہ</span>
+      </div>
     </div>
   `;
 
   const footerTemplate = `
-    <div style="font-family: 'Noto Nastaliq Urdu', 'Noto Naskh Arabic', sans-serif; font-size: 9px; color: #64748b; width: 100%; padding: 0 14mm; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; direction: rtl; box-sizing: border-box;">
-      <span>${showWatermark ? 'Qalam AI' : ''}</span>
-      <span style="font-weight: bold; color: #0f172a; background: #f1f5f9; padding: 1px 8px; border-radius: 4px; border: 1px solid #cbd5e1;">
-        صفحہ <span class="pageNumber"></span> / <span class="totalPages"></span>
-      </span>
-      <span>${cleanTitle}</span>
+    <style>
+      * { box-sizing: border-box; }
+    </style>
+    <div style="width: 100%; height: 16mm; position: relative; font-family: 'Noto Nastaliq Urdu', 'Noto Naskh Arabic', sans-serif; direction: rtl; -webkit-print-color-adjust: exact;">
+      <!-- Outer Border Bottom & Sides -->
+      <div style="position: absolute; top: 0; bottom: 6mm; left: 9mm; right: 9mm; border-bottom: 1.5px solid #1e293b; border-left: 1.5px solid #1e293b; border-right: 1.5px solid #1e293b; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;"></div>
+      <!-- Inner Border Bottom & Sides -->
+      <div style="position: absolute; top: 0; bottom: 7.5mm; left: 10.5mm; right: 10.5mm; border-bottom: 0.8px solid ${themeColor}; border-left: 0.8px solid ${themeColor}; border-right: 0.8px solid ${themeColor}; border-bottom-left-radius: 2px; border-bottom-right-radius: 2px;"></div>
+      
+      <!-- Running Footer Bar inside the frame -->
+      <div style="position: absolute; top: 2mm; left: 14mm; right: 14mm; display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: #64748b; border-top: 0.8px solid #e2e8f0; padding-top: 1.5mm;">
+        <span>${showWatermark ? 'Qalam AI' : ''}</span>
+        <span style="font-weight: bold; color: #0f172a; background: #f1f5f9; padding: 1px 8px; border-radius: 4px; border: 1px solid #cbd5e1;">
+          صفحہ <span class="pageNumber"></span> / <span class="totalPages"></span>
+        </span>
+        <span>${cleanTitle}</span>
+      </div>
     </div>
   `;
 
