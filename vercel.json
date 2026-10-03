@@ -13,6 +13,11 @@
       "use": "@vercel/node"
     }
   ],
+  "functions": {
+    "server.ts": {
+      "includeFiles": "node_modules/@fontsource/**/files/*"
+    }
+  },
   "routes": [
     {
       "src": "/api/(.*)",

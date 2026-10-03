@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import puppeteer from 'puppeteer';
@@ -484,20 +483,40 @@ app.post('/api/generate-pdf', async (req, res) => {
       finalHtml = `<head>${fontStyles}</head>${finalHtml}`;
     }
 
-    browser = await puppeteer.launch({ 
-      headless: true,
-      args: [
-        '--no-sandbox', 
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-gpu'
-      ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
-    });
+    if (process.env.VERCEL) {
+      console.log('[PDF Generator] Launching in Vercel Serverless environment using @sparticuz/chromium...');
+      const chromium = (await import('@sparticuz/chromium')).default as any;
+      const puppeteerCore = (await import('puppeteer-core')).default as any;
+      
+      browser = await puppeteerCore.launch({
+        args: [
+          ...chromium.args,
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu'
+        ],
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+      });
+    } else {
+      console.log('[PDF Generator] Launching in local environment using standard puppeteer...');
+      browser = await puppeteer.launch({ 
+        headless: true,
+        args: [
+          '--no-sandbox', 
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--disable-gpu'
+        ],
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+      });
+    }
     
     const page = await browser.newPage();
     
@@ -550,7 +569,7 @@ app.post('/api/generate-pdf', async (req, res) => {
     });
   } finally {
     if (browser) {
-      await browser.close().catch(e => console.error('Error closing browser:', e));
+      await browser.close().catch((e: any) => console.error('Error closing browser:', e));
     }
   }
 });
@@ -1726,7 +1745,7 @@ async function startServer() {
   app.use('/fonts', express.static('node_modules/@fontsource'));
 
   if (process.env.NODE_ENV !== 'production') {
-
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
