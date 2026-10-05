@@ -156,6 +156,29 @@
   transition: font-size 0.2s ease, line-height 0.2s ease;
 }
 
+/* Hide native caret only inside contenteditable fields */
+[contenteditable] {
+  caret-color: transparent !important;
+}
+
+/* Beautiful custom thin blinking caret styling */
+.custom-caret {
+  position: fixed;
+  z-index: 99999;
+  width: 2px;
+  background-color: #D4AF37; /* gold styling */
+  pointer-events: none;
+  animation: qalam-caret-blink 1.0s steps(2, start) infinite;
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.35);
+  border-radius: 1px;
+}
+
+@keyframes qalam-caret-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
 @media print {
   body {
     background: white !important;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Language, InputMode, BookGenre, AttachedFile, ChapterOutline, GeneratedBookData, CoverPageConfig, StyleOverrides } from './types';
+import { Language, InputMode, BookGenre, AttachedFile, ChapterOutline, GeneratedBookData, CoverPageConfig, StyleOverrides, PageImageConfig } from './types';
 import { translations } from './i18n/translations';
 import { Header } from './components/Header';
 import { Hero } from './components/Hero';
@@ -43,6 +43,9 @@ export default function App() {
   // Manual style overrides states
   const [prefaceStyles, setPrefaceStyles] = useState<StyleOverrides>({});
   const [conclusionStyles, setConclusionStyles] = useState<StyleOverrides>({});
+
+  const [prefaceImage, setPrefaceImage] = useState<PageImageConfig | undefined>(undefined);
+  const [conclusionImage, setConclusionImage] = useState<PageImageConfig | undefined>(undefined);
 
   // Customizable Professional Cover Page State
   const [coverConfig, setCoverConfig] = useState<CoverPageConfig>({
@@ -174,11 +177,13 @@ export default function App() {
           orientation,
           autoLayout,
           coverConfig,
+          prefaceImage,
+          conclusionImage,
         }).catch((e) => console.warn('[PDF Cache Warmer] Background warming note:', e));
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [title, subtitle, authorName, chapters, coverConfig, pageSize, orientation, bodyFontSize, isFullBookViewOpen, prefaceStyles, conclusionStyles]);
+  }, [title, subtitle, authorName, chapters, coverConfig, pageSize, orientation, bodyFontSize, isFullBookViewOpen, prefaceStyles, conclusionStyles, prefaceImage, conclusionImage]);
 
   /**
    * Seamlessly re-attaches to a running or completed background job
@@ -527,6 +532,8 @@ export default function App() {
         orientation,
         autoLayout,
         coverConfig,
+        prefaceImage,
+        conclusionImage,
       });
 
       triggerPdfDownload(blob, filename);
@@ -569,6 +576,8 @@ export default function App() {
         orientation,
         autoLayout,
         coverConfig,
+        prefaceImage,
+        conclusionImage,
       });
 
       const res = await shareBookPdf(blob, filename, title);
@@ -741,6 +750,10 @@ export default function App() {
           setBodyFontSize={setBodyFontSize}
           coverConfig={coverConfig}
           setCoverConfig={setCoverConfig}
+          prefaceImage={prefaceImage}
+          setPrefaceImage={setPrefaceImage}
+          conclusionImage={conclusionImage}
+          setConclusionImage={setConclusionImage}
         />
       )}
 
@@ -771,6 +784,8 @@ export default function App() {
           setAutoLayout={setAutoLayout}
           coverConfig={coverConfig}
           setCoverConfig={setCoverConfig}
+          prefaceImage={prefaceImage}
+          conclusionImage={conclusionImage}
           isOpenModal={true}
           onCloseModal={() => setIsFullBookViewOpen(false)}
           generationError={generationError}

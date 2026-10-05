@@ -43,6 +43,17 @@ export interface StyleOverrides {
   pageBreakBefore?: boolean;
 }
 
+export interface PageImageConfig {
+  url: string; // Base64 data URL
+  sizeType: 'small' | 'medium' | 'large' | 'custom';
+  width: number; // percentage (e.g. 50)
+  height?: number; // percentage or auto
+  alignment: 'left' | 'center' | 'right';
+  xOffset: number; // in pixels
+  yOffset: number; // in pixels
+  keepAspectRatio: boolean;
+}
+
 export interface ChapterSection {
   heading: string;
   content: string;
@@ -57,6 +68,7 @@ export interface ChapterOutline {
   subheadings: string[];
   sections?: ChapterSection[];
   titleStyles?: StyleOverrides;
+  chapterImage?: PageImageConfig;
 }
 
 export interface TOCItem {
@@ -110,6 +122,8 @@ export interface BookPdfParams {
   autoLayout?: boolean;
   coverConfig?: CoverPageConfig;
   showWatermark?: boolean;
+  prefaceImage?: PageImageConfig;
+  conclusionImage?: PageImageConfig;
 }
 
 export type PreviewPage = 'cover' | 'title_page' | 'toc' | 'conclusion' | string;

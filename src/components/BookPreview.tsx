@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { TranslationDictionary } from '../i18n/translations';
-import { PreviewPage, ChapterOutline, BookGenre, CoverPageConfig, CoverLayout, StyleOverrides } from '../types';
+import { PreviewPage, ChapterOutline, BookGenre, CoverPageConfig, CoverLayout, StyleOverrides, PageImageConfig } from '../types';
 import { QuotaErrorInfo } from './Workspace';
 import { SupportedGeminiModel } from '../config/models';
 import { renderScriptAwareReactParagraphs } from '../services/scriptTypography';
@@ -73,6 +73,8 @@ interface BookPreviewProps {
   onSharePdf?: () => void;
   isExportingPdf?: boolean;
   isSharingPdf?: boolean;
+  prefaceImage?: PageImageConfig;
+  conclusionImage?: PageImageConfig;
 }
 
 export const BookPreview: React.FC<BookPreviewProps> = ({
@@ -111,6 +113,8 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
   onSharePdf,
   isExportingPdf,
   isSharingPdf,
+  prefaceImage,
+  conclusionImage,
 }) => {
   const [currentPage, setCurrentPage] = useState<PreviewPage>('cover');
   const [zoomLevel, setZoomLevel] = useState<number>(100);
@@ -262,6 +266,39 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
   // Helper to render formatted book paragraphs with script-aware fonts and clean breaks
   const renderBookParagraphs = (contentStr: string, fontSize: number) => {
     return renderScriptAwareReactParagraphs(contentStr, fontSize);
+  };
+
+  const renderImagePreview = (imgConfig?: PageImageConfig) => {
+    if (!imgConfig) return null;
+
+    const widthStyle = imgConfig.sizeType === 'custom' ? `${imgConfig.width}%` : 
+                       imgConfig.sizeType === 'small' ? '25%' :
+                       imgConfig.sizeType === 'medium' ? '50%' : '75%';
+
+    const wrapperStyle: React.CSSProperties = {
+      display: 'flex',
+      justifyContent: imgConfig.alignment === 'left' ? 'flex-start' : 
+                      imgConfig.alignment === 'right' ? 'flex-end' : 'center',
+      width: '100%',
+      marginTop: '12px',
+      marginBottom: '12px',
+    };
+
+    return (
+      <div style={wrapperStyle} className="mt-4">
+        <img 
+          src={imgConfig.url} 
+          alt="Book Visual" 
+          style={{
+            width: widthStyle,
+            transform: `translate(${imgConfig.xOffset}px, ${imgConfig.yOffset}px)`,
+            aspectRatio: imgConfig.keepAspectRatio ? 'auto' : 'none',
+            objectFit: imgConfig.keepAspectRatio ? 'contain' : 'fill',
+          }}
+          className="rounded-lg shadow-xs max-w-full h-auto"
+        />
+      </div>
+    );
   };
 
   const toUrduDigits = (num: number): string => {
@@ -416,6 +453,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                   {renderBookParagraphs(prefaceNote, effectiveFontSize)}
                 </div>
               )}
+              {renderImagePreview(prefaceImage)}
             </div>
 
             {/* Footer with Page Number */}
@@ -597,6 +635,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                   )}
                 </div>
               )}
+              {renderImagePreview(currentChap?.chapterImage)}
             </div>
 
             {/* Footer */}
@@ -649,6 +688,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                   امید ہے کہ یہ تصنیف آپ کے لیے علمی اور عملی میدان میں مفید ثابت ہوگی۔
                 </p>
               </div>
+              {renderImagePreview(conclusionImage)}
             </div>
 
             {/* Footer */}

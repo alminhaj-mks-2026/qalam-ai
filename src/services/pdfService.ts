@@ -62,7 +62,7 @@ function computeBookHash(params: BookPdfParams): string {
   const chapterSig = (params.chapters || [])
     .map(
       (c) =>
-        `${c.title}:${serializeStyles(c.titleStyles)}:${c.sections?.map((s) => `${s.heading}:${serializeStyles(s.headingStyles)}:${s.content}:${serializeStyles(s.contentStyles)}`).join(',')}`
+        `${c.title}:${serializeStyles(c.titleStyles)}:${c.chapterImage ? `${c.chapterImage.width}_${c.chapterImage.alignment}_${c.chapterImage.xOffset}_${c.chapterImage.yOffset}_${c.chapterImage.url.slice(-30)}` : 'no_img'}:${c.sections?.map((s) => `${s.heading}:${serializeStyles(s.headingStyles)}:${s.content}:${serializeStyles(s.contentStyles)}`).join(',')}`
     )
     .join('|');
 
@@ -73,7 +73,10 @@ function computeBookHash(params: BookPdfParams): string {
   const prefaceSig = serializeStyles(params.prefaceStyles);
   const conclusionSig = serializeStyles(params.conclusionStyles);
 
-  return `${params.title}_${params.subtitle}_${params.authorName}_${chapterSig}_${params.bodyFontSize || 16}_${params.pageSize || 'A4'}_${params.orientation || 'portrait'}_${coverSig}_${params.prefaceNote || ''}_${prefaceSig}_${params.conclusionNote || ''}_${conclusionSig}`;
+  const prefImageSig = params.prefaceImage ? `${params.prefaceImage.width}_${params.prefaceImage.alignment}_${params.prefaceImage.xOffset}_${params.prefaceImage.yOffset}_${params.prefaceImage.url.slice(-30)}` : 'no_pref_img';
+  const conclImageSig = params.conclusionImage ? `${params.conclusionImage.width}_${params.conclusionImage.alignment}_${params.conclusionImage.xOffset}_${params.conclusionImage.yOffset}_${params.conclusionImage.url.slice(-30)}` : 'no_concl_img';
+
+  return `${params.title}_${params.subtitle}_${params.authorName}_${chapterSig}_${params.bodyFontSize || 16}_${params.pageSize || 'A4'}_${params.orientation || 'portrait'}_${coverSig}_${params.prefaceNote || ''}_${prefaceSig}_${prefImageSig}_${params.conclusionNote || ''}_${conclusionSig}_${conclImageSig}`;
 }
 
 function removeRepeatedHeading(contentStr: string, headingToCompare: string): string {
@@ -93,6 +96,35 @@ function removeRepeatedHeading(contentStr: string, headingToCompare: string): st
 function formatParagraphsForPdf(text: string): string {
   if (!text) return '';
   return formatScriptAwareHtml(text);
+}
+
+function formatImageForPdf(imgConfig?: any): string {
+  if (!imgConfig || !imgConfig.url) return '';
+
+  const widthStyle = imgConfig.sizeType === 'custom' ? `${imgConfig.width}%` : 
+                     imgConfig.sizeType === 'small' ? '25%' :
+                     imgConfig.sizeType === 'medium' ? '50%' : '75%';
+
+  const alignmentStyle = imgConfig.alignment === 'left' ? 'flex-start' : 
+                         imgConfig.alignment === 'right' ? 'flex-end' : 'center';
+
+  return `
+    <div style="display: flex; justify-content: ${alignmentStyle}; width: 100%; margin-top: 14px; margin-bottom: 14px; page-break-inside: avoid; break-inside: avoid;">
+      <img 
+        src="${imgConfig.url}" 
+        alt="Page Visual" 
+        style="
+          width: ${widthStyle}; 
+          max-width: 100%; 
+          height: auto; 
+          border-radius: 8px; 
+          transform: translate(${imgConfig.xOffset}px, ${imgConfig.yOffset}px);
+          aspect-ratio: ${imgConfig.keepAspectRatio ? 'auto' : 'none'};
+          object-fit: ${imgConfig.keepAspectRatio ? 'contain' : 'fill'};
+        "
+      />
+    </div>
+  `;
 }
 
 /**
@@ -534,6 +566,7 @@ export async function createBookPdfBlob(
         <div class="body-text">
           ${formatParagraphsForPdf(params.prefaceNote)}
         </div>
+        ${formatImageForPdf(params.prefaceImage)}
       </div>
     ` : ''}
 
@@ -568,6 +601,7 @@ export async function createBookPdfBlob(
               </div>
             `;
           }).join('')}
+          ${formatImageForPdf(ch.chapterImage)}
         </div>
       `;
     }).join('')}
@@ -580,6 +614,7 @@ export async function createBookPdfBlob(
         <div class="body-text">
           ${formatParagraphsForPdf(params.conclusionNote)}
         </div>
+        ${formatImageForPdf(params.conclusionImage)}
       </div>
     ` : ''}
   </div>

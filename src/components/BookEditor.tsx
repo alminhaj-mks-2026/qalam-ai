@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TranslationDictionary } from '../i18n/translations';
-import { ChapterOutline, StyleOverrides, CoverPageConfig, CoverLayout } from '../types';
+import { ChapterOutline, StyleOverrides, CoverPageConfig, CoverLayout, PageImageConfig } from '../types';
 import {
   Edit3,
   BookOpen,
@@ -100,6 +100,10 @@ interface BookEditorProps {
   setBodyFontSize: React.Dispatch<React.SetStateAction<number>>;
   coverConfig: CoverPageConfig;
   setCoverConfig: React.Dispatch<React.SetStateAction<CoverPageConfig>>;
+  prefaceImage: PageImageConfig | undefined;
+  setPrefaceImage: React.Dispatch<React.SetStateAction<PageImageConfig | undefined>>;
+  conclusionImage: PageImageConfig | undefined;
+  setConclusionImage: React.Dispatch<React.SetStateAction<PageImageConfig | undefined>>;
 }
 
 export const BookEditor: React.FC<BookEditorProps> = ({
@@ -131,9 +135,242 @@ export const BookEditor: React.FC<BookEditorProps> = ({
   setBodyFontSize,
   coverConfig,
   setCoverConfig,
+  prefaceImage,
+  setPrefaceImage,
+  conclusionImage,
+  setConclusionImage,
 }) => {
   // Navigation State inside Editor matching actual Pages
   const [editorPage, setEditorPage] = useState<'cover' | 'title_page' | 'toc' | string>('cover');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Custom Thin Caret Positioning State
+  const [caretPos, setCaretPos] = useState<{ top: number; left: number; height: number; visible: boolean }>({
+    top: 0,
+    left: 0,
+    height: 0,
+    visible: false,
+  });
+
+  useEffect(() => {
+    const updateCaret = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) {
+        setCaretPos((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+        return;
+      }
+
+      const activeEl = document.activeElement;
+      if (!activeEl || !activeEl.hasAttribute('contenteditable')) {
+        setCaretPos((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+        return;
+      }
+
+      const range = selection.getRangeAt(0);
+      const style = window.getComputedStyle(activeEl);
+      const fontSize = parseFloat(style.fontSize) || 16;
+      const dir = style.direction || 'rtl';
+
+      let rect: { top: number; left: number; height: number } | null = null;
+      const rects = range.getClientRects();
+
+      if (rects && rects.length > 0 && rects[0].height > 0) {
+        rect = {
+          top: rects[0].top,
+          left: rects[0].left,
+          height: rects[0].height,
+        };
+      } else {
+        const rangeBounds = range.getBoundingClientRect();
+        if (rangeBounds && rangeBounds.height > 0) {
+          rect = {
+            top: rangeBounds.top,
+            left: rangeBounds.left,
+            height: rangeBounds.height,
+          };
+        } else {
+          const elRect = activeEl.getBoundingClientRect();
+          const paddingLeft = parseFloat(style.paddingLeft) || 0;
+          const paddingRight = parseFloat(style.paddingRight) || 0;
+          const paddingTop = parseFloat(style.paddingTop) || 0;
+
+          rect = {
+            top: elRect.top + paddingTop,
+            left: dir === 'rtl' ? elRect.right - paddingRight - 2 : elRect.left + paddingLeft,
+            height: fontSize,
+          };
+        }
+      }
+
+      if (rect) {
+        setCaretPos({
+          top: rect.top,
+          left: rect.left,
+          height: Math.min(rect.height, fontSize * 1.3) || fontSize,
+          visible: true,
+        });
+      }
+    };
+
+    document.addEventListener('selectionchange', updateCaret);
+    window.addEventListener('scroll', updateCaret, { capture: true, passive: true });
+    window.addEventListener('resize', updateCaret, { passive: true });
+    document.addEventListener('keyup', updateCaret);
+    document.addEventListener('keydown', updateCaret);
+    document.addEventListener('mousedown', updateCaret);
+    document.addEventListener('mouseup', updateCaret);
+    document.addEventListener('focusin', updateCaret);
+    document.addEventListener('focusout', updateCaret);
+
+    return () => {
+      document.removeEventListener('selectionchange', updateCaret);
+      window.removeEventListener('scroll', updateCaret, { capture: true });
+      window.removeEventListener('resize', updateCaret);
+      document.removeEventListener('keyup', updateCaret);
+      document.removeEventListener('keydown', updateCaret);
+      document.removeEventListener('mousedown', updateCaret);
+      document.removeEventListener('mouseup', updateCaret);
+      document.removeEventListener('focusin', updateCaret);
+      document.removeEventListener('focusout', updateCaret);
+    };
+  }, [editorPage]);
+
+  const [isResizing, setIsResizing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [initialImageState, setInitialImageState] = useState({ width: 50, xOffset: 0, yOffset: 0 });
+
+  const [isImageSelected, setIsImageSelected] = useState(false);
+  const [resizeCorner, setResizeCorner] = useState<'tl' | 'tr' | 'bl' | 'br' | null>(null);
+  const imgWrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleDocumentClick = (e: any) => {
+      if (imgWrapperRef.current && !imgWrapperRef.current.contains(e.target as Node)) {
+        setIsImageSelected(false);
+      }
+    };
+    document.addEventListener('pointerdown', handleDocumentClick);
+    return () => {
+      document.removeEventListener('pointerdown', handleDocumentClick);
+    };
+  }, []);
+
+  const getCurrentImage = (): PageImageConfig | undefined => {
+    if (editorPage === 'title_page') {
+      return prefaceImage;
+    }
+    if (editorPage === 'conclusion') {
+      return conclusionImage;
+    }
+    if (editorPage.startsWith('chapter_')) {
+      const idx = parseInt(editorPage.replace('chapter_', ''), 10) - 1;
+      return chapters[idx]?.chapterImage;
+    }
+    return undefined;
+  };
+
+  const setCurrentImage = (img: PageImageConfig | undefined) => {
+    if (editorPage === 'title_page') {
+      setPrefaceImage(img);
+    } else if (editorPage === 'conclusion') {
+      setConclusionImage(img);
+    } else if (editorPage.startsWith('chapter_')) {
+      const idx = parseInt(editorPage.replace('chapter_', ''), 10) - 1;
+      setChapters((prev) => {
+        const updated = [...prev];
+        if (updated[idx]) {
+          updated[idx] = { ...updated[idx], chapterImage: img };
+        }
+        return updated;
+      });
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          const newImage: PageImageConfig = {
+            url: event.target.result as string,
+            sizeType: 'medium',
+            width: 50,
+            alignment: 'center',
+            xOffset: 0,
+            yOffset: 0,
+            keepAspectRatio: true,
+          };
+          setCurrentImage(newImage);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Touch helpers
+  const getEventCoords = (e: any) => {
+    if (e.touches && e.touches.length > 0) {
+      return { clientX: e.touches[0].clientX, clientY: e.touches[0].clientY };
+    }
+    return { clientX: e.clientX, clientY: e.clientY };
+  };
+
+  useEffect(() => {
+    const handleMove = (e: any) => {
+      if (!isResizing && !isDragging) return;
+      const coords = getEventCoords(e);
+      const imgConfig = getCurrentImage();
+      if (!imgConfig) return;
+
+      if (isResizing) {
+        const deltaX = coords.clientX - dragStart.x;
+        const multiplier = (resizeCorner === 'tl' || resizeCorner === 'bl') ? -1 : 1;
+        const newWidth = Math.max(15, Math.min(100, initialImageState.width + multiplier * (deltaX / 5)));
+        setCurrentImage({
+          ...imgConfig,
+          width: Math.round(newWidth),
+          sizeType: 'custom'
+        });
+      } else if (isDragging) {
+        const deltaX = coords.clientX - dragStart.x;
+        const deltaY = coords.clientY - dragStart.y;
+        
+        // Drag limit within boundary so image doesn't fly off the screen
+        const targetX = Math.round(initialImageState.xOffset + deltaX);
+        const targetY = Math.round(initialImageState.yOffset + deltaY);
+        const constrainedX = Math.max(-280, Math.min(280, targetX));
+        const constrainedY = Math.max(-450, Math.min(450, targetY));
+
+        setCurrentImage({
+          ...imgConfig,
+          xOffset: constrainedX,
+          yOffset: constrainedY
+        });
+      }
+    };
+
+    const handleUp = () => {
+      setIsResizing(false);
+      setIsDragging(false);
+      setResizeCorner(null);
+    };
+
+    if (isResizing || isDragging) {
+      document.addEventListener('mousemove', handleMove);
+      document.addEventListener('mouseup', handleUp);
+      document.addEventListener('touchmove', handleMove, { passive: false });
+      document.addEventListener('touchend', handleUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleUp);
+      document.removeEventListener('touchmove', handleMove);
+      document.removeEventListener('touchend', handleUp);
+    };
+  }, [isResizing, isDragging, resizeCorner, dragStart, initialImageState, editorPage, prefaceImage, conclusionImage, chapters]);
   
   // The path of the currently focused input/textarea. Allows Fixed Toolbar to modify its styling.
   const [activeFieldPath, setActiveFieldPath] = useState<FieldPath>({ type: 'prefaceNote' });
@@ -706,6 +943,184 @@ export const BookEditor: React.FC<BookEditorProps> = ({
 
   const currentStyles = getStylesForPath(activeFieldPath);
 
+  const renderA4ImageSection = () => {
+    if (editorPage === 'cover' || editorPage === 'toc') return null;
+
+    const imgConfig = getCurrentImage();
+
+    if (!imgConfig) {
+      return null;
+    }
+
+    const imgStyle: React.CSSProperties = {
+      width: imgConfig.sizeType === 'custom' ? `${imgConfig.width}%` : 
+             imgConfig.sizeType === 'small' ? '25%' :
+             imgConfig.sizeType === 'medium' ? '50%' : '75%',
+      transform: `translate(${imgConfig.xOffset}px, ${imgConfig.yOffset}px)`,
+      aspectRatio: imgConfig.keepAspectRatio ? 'auto' : 'none',
+      objectFit: imgConfig.keepAspectRatio ? 'contain' : 'fill',
+    };
+
+    const wrapperStyle: React.CSSProperties = {
+      display: 'flex',
+      justifyContent: imgConfig.alignment === 'left' ? 'flex-start' : 
+                      imgConfig.alignment === 'right' ? 'flex-end' : 'center',
+      width: '100%',
+      position: 'relative',
+      marginTop: '12px',
+      marginBottom: '12px',
+    };
+
+    return (
+      <div className="mt-4 border-t border-dashed border-slate-200 pt-4" dir="rtl" ref={imgWrapperRef}>
+        <div style={wrapperStyle} className="group relative">
+          <div 
+            className={`relative transition-all rounded-lg overflow-visible ${
+              isImageSelected 
+                ? 'border-2 border-[#D4AF37] shadow-lg ring-2 ring-[#D4AF37]/20 bg-amber-500/5' 
+                : 'border border-transparent hover:border-slate-300/30'
+            }`}
+            style={{ 
+              width: imgStyle.width, 
+              transform: imgStyle.transform,
+              cursor: isDragging ? 'grabbing' : 'grab'
+            }}
+            onTouchStart={(e) => {
+              const coords = getEventCoords(e);
+              setIsDragging(true);
+              setIsImageSelected(true);
+              setDragStart({ x: coords.clientX, y: coords.clientY });
+              setInitialImageState({ width: imgConfig.width, xOffset: imgConfig.xOffset, yOffset: imgConfig.yOffset });
+            }}
+            onMouseDown={(e) => {
+              const coords = getEventCoords(e);
+              setIsDragging(true);
+              setIsImageSelected(true);
+              setDragStart({ x: coords.clientX, y: coords.clientY });
+              setInitialImageState({ width: imgConfig.width, xOffset: imgConfig.xOffset, yOffset: imgConfig.yOffset });
+            }}
+          >
+            <img 
+              src={imgConfig.url} 
+              alt="Uploaded Page Visual" 
+              className="w-full h-auto select-none pointer-events-none rounded-md"
+              style={{ aspectRatio: imgStyle.aspectRatio, objectFit: imgStyle.objectFit }}
+            />
+
+            {/* Small Delete Button (🗑️) at top-right corner of the image */}
+            {isImageSelected && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCurrentImage(undefined);
+                  setIsImageSelected(false);
+                }}
+                className="absolute -top-3 -right-3 w-6 h-6 bg-rose-600 hover:bg-rose-700 text-white rounded-full flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-all z-40 cursor-pointer border border-white"
+                title="تصویر حذف کریں (Delete Image)"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            {/* 4 Corner Resize Handles */}
+            {isImageSelected && (
+              <>
+                {/* Top Left */}
+                <div 
+                  className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 bg-white border-2 border-[#D4AF37] rounded-full shadow-md z-30 cursor-nwse-resize touch-none hover:scale-125 transition-transform"
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const coords = getEventCoords(e);
+                    setIsResizing(true);
+                    setResizeCorner('tl');
+                    setDragStart({ x: coords.clientX, y: coords.clientY });
+                    setInitialImageState({ width: imgConfig.width, xOffset: imgConfig.xOffset, yOffset: imgConfig.yOffset });
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const coords = getEventCoords(e);
+                    setIsResizing(true);
+                    setResizeCorner('tl');
+                    setDragStart({ x: coords.clientX, y: coords.clientY });
+                    setInitialImageState({ width: imgConfig.width, xOffset: imgConfig.xOffset, yOffset: imgConfig.yOffset });
+                  }}
+                />
+                {/* Top Right */}
+                <div 
+                  className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-white border-2 border-[#D4AF37] rounded-full shadow-md z-30 cursor-nesw-resize touch-none hover:scale-125 transition-transform"
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const coords = getEventCoords(e);
+                    setIsResizing(true);
+                    setResizeCorner('tr');
+                    setDragStart({ x: coords.clientX, y: coords.clientY });
+                    setInitialImageState({ width: imgConfig.width, xOffset: imgConfig.xOffset, yOffset: imgConfig.yOffset });
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const coords = getEventCoords(e);
+                    setIsResizing(true);
+                    setResizeCorner('tr');
+                    setDragStart({ x: coords.clientX, y: coords.clientY });
+                    setInitialImageState({ width: imgConfig.width, xOffset: imgConfig.xOffset, yOffset: imgConfig.yOffset });
+                  }}
+                />
+                {/* Bottom Left */}
+                <div 
+                  className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 bg-white border-2 border-[#D4AF37] rounded-full shadow-md z-30 cursor-nesw-resize touch-none hover:scale-125 transition-transform"
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const coords = getEventCoords(e);
+                    setIsResizing(true);
+                    setResizeCorner('bl');
+                    setDragStart({ x: coords.clientX, y: coords.clientY });
+                    setInitialImageState({ width: imgConfig.width, xOffset: imgConfig.xOffset, yOffset: imgConfig.yOffset });
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const coords = getEventCoords(e);
+                    setIsResizing(true);
+                    setResizeCorner('bl');
+                    setDragStart({ x: coords.clientX, y: coords.clientY });
+                    setInitialImageState({ width: imgConfig.width, xOffset: imgConfig.xOffset, yOffset: imgConfig.yOffset });
+                  }}
+                />
+                {/* Bottom Right */}
+                <div 
+                  className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-white border-2 border-[#D4AF37] rounded-full shadow-md z-30 cursor-nwse-resize touch-none hover:scale-125 transition-transform"
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const coords = getEventCoords(e);
+                    setIsResizing(true);
+                    setResizeCorner('br');
+                    setDragStart({ x: coords.clientX, y: coords.clientY });
+                    setInitialImageState({ width: imgConfig.width, xOffset: imgConfig.xOffset, yOffset: imgConfig.yOffset });
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const coords = getEventCoords(e);
+                    setIsResizing(true);
+                    setResizeCorner('br');
+                    setDragStart({ x: coords.clientX, y: coords.clientY });
+                    setInitialImageState({ width: imgConfig.width, xOffset: imgConfig.xOffset, yOffset: imgConfig.yOffset });
+                  }}
+                />
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // NAVIGATION LIST
   const editorPagesList = [
     { id: 'cover', name: 'سرورق (Cover Page)' },
@@ -726,85 +1141,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
               <Edit3 className="w-5 h-5" />
             </div>
 
-            {/* Qalam Copy System Dropdown */}
-            <div className="relative inline-block text-left" ref={dropdownRef}>
-              <button
-                onClick={() => setIsCopyMenuOpen(!isCopyMenuOpen)}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-800 font-bold font-urdu text-sm rounded-xl border border-slate-300 shadow-xs transition-all cursor-pointer"
-              >
-                <Clipboard className="w-4 h-4 text-[#D4AF37]" />
-                <span>📋 کاپی</span>
-              </button>
 
-              {isCopyMenuOpen && (
-                <div className="absolute right-0 mt-2 w-56 rounded-2xl bg-white border border-slate-200 shadow-xl z-50 py-1.5 animate-fade-in text-right font-urdu">
-                  {/* Option 1: Copy Selected Text */}
-                  <button
-                    onClick={() => {
-                      handleCopySelectedText();
-                      setIsCopyMenuOpen(false);
-                    }}
-                    disabled={!hasSelection}
-                    className={`w-full flex items-center justify-between px-4 py-2.5 text-xs font-bold transition-colors ${
-                      hasSelection
-                        ? 'text-slate-700 hover:bg-slate-50 hover:text-[#D4AF37] cursor-pointer'
-                        : 'text-slate-300 cursor-not-allowed opacity-50'
-                    }`}
-                  >
-                    <span>📋 منتخب عبارت کاپی کریں</span>
-                    {!hasSelection && <span className="text-[9px] text-slate-400 font-normal">(پہلے متن منتخب کریں)</span>}
-                  </button>
-
-                  {/* Option 2: Copy Current Portion / Chapter */}
-                  {editorPage.startsWith('chapter_') && (
-                    <button
-                      onClick={() => {
-                        handleCopyCurrentChapter();
-                        setIsCopyMenuOpen(false);
-                      }}
-                      className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-[#D4AF37] transition-colors cursor-pointer border-t border-slate-100"
-                    >
-                      <span>📖 موجودہ باب کاپی کریں</span>
-                    </button>
-                  )}
-
-                  {editorPage === 'title_page' && (
-                    <button
-                      onClick={() => {
-                        handleCopyPreface();
-                        setIsCopyMenuOpen(false);
-                      }}
-                      className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-[#D4AF37] transition-colors cursor-pointer border-t border-slate-100"
-                    >
-                      <span>📝 پیش لفظ کاپی کریں</span>
-                    </button>
-                  )}
-
-                  {editorPage === 'conclusion' && (
-                    <button
-                      onClick={() => {
-                        handleCopyConclusion();
-                        setIsCopyMenuOpen(false);
-                      }}
-                      className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-[#D4AF37] transition-colors cursor-pointer border-t border-slate-100"
-                    >
-                      <span>🎓 اختتامیہ کاپی کریں</span>
-                    </button>
-                  )}
-
-                  {/* Option 3: Copy Full Book */}
-                  <button
-                    onClick={() => {
-                      handleCopyFullBook();
-                      setIsCopyMenuOpen(false);
-                    }}
-                    className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-[#D4AF37] transition-colors border-t border-slate-100 cursor-pointer"
-                  >
-                    <span>📚 مکمل کتاب کاپی کریں</span>
-                  </button>
-                </div>
-              )}
-            </div>
           </div>
 
           <button
@@ -909,7 +1246,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
             </div>
           </div>
 
-          {/* Row 2: Bold | Italic | Underline | Alignment controls */}
+          {/* Row 2: Bold | Italic | Underline | Alignment controls | Copy & Image */}
           <div className="flex flex-wrap items-center gap-2 w-full justify-start text-xs">
             {/* Bold, Italic, Underline */}
             <div className="flex items-center gap-0.5 bg-slate-800 p-1 rounded-xl border border-slate-700 shrink-0">
@@ -955,6 +1292,101 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                   </button>
                 );
               })}
+            </div>
+
+            {/* Action Group: Copy Menu & Image Button */}
+            <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-slate-700 shrink-0">
+              {/* Qalam Copy System Dropdown inside toolbar */}
+              <div className="relative inline-block text-left" ref={dropdownRef}>
+                <button
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => setIsCopyMenuOpen(!isCopyMenuOpen)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white font-bold font-urdu text-[11px] rounded-lg transition-all cursor-pointer"
+                >
+                  <Clipboard className="w-3 h-3 text-[#D4AF37]" />
+                  <span>📋 کاپی</span>
+                </button>
+
+                {isCopyMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-52 rounded-xl bg-[#0F172A] border border-[#D4AF37]/30 shadow-xl z-50 py-1.5 text-right font-urdu text-slate-200">
+                    {/* Option 1: Copy Selected Text */}
+                    <button
+                      onClick={() => {
+                        handleCopySelectedText();
+                        setIsCopyMenuOpen(false);
+                      }}
+                      disabled={!hasSelection}
+                      className={`w-full flex items-center justify-between px-3.5 py-2 text-xs font-bold transition-colors ${
+                        hasSelection
+                          ? 'text-slate-200 hover:bg-slate-800 hover:text-[#D4AF37] cursor-pointer'
+                          : 'text-slate-600 cursor-not-allowed opacity-50'
+                      }`}
+                    >
+                      <span>📋 منتخب عبارت کاپی کریں</span>
+                      {!hasSelection && <span className="text-[9px] text-slate-500 font-normal">(پہلے متن منتخب کریں)</span>}
+                    </button>
+
+                    {/* Option 2: Copy Current Portion / Chapter */}
+                    {editorPage.startsWith('chapter_') && (
+                      <button
+                        onClick={() => {
+                          handleCopyCurrentChapter();
+                          setIsCopyMenuOpen(false);
+                        }}
+                        className="w-full flex items-center justify-between px-3.5 py-2 text-xs font-bold text-slate-200 hover:bg-slate-800 hover:text-[#D4AF37] transition-colors cursor-pointer border-t border-slate-800"
+                      >
+                        <span>📖 موجودہ باب کاپی کریں</span>
+                      </button>
+                    )}
+
+                    {editorPage === 'title_page' && (
+                      <button
+                        onClick={() => {
+                          handleCopyPreface();
+                          setIsCopyMenuOpen(false);
+                        }}
+                        className="w-full flex items-center justify-between px-3.5 py-2 text-xs font-bold text-slate-200 hover:bg-slate-800 hover:text-[#D4AF37] transition-colors cursor-pointer border-t border-slate-800"
+                      >
+                        <span>📝 پیش لفظ کاپی کریں</span>
+                      </button>
+                    )}
+
+                    {editorPage === 'conclusion' && (
+                      <button
+                        onClick={() => {
+                          handleCopyConclusion();
+                          setIsCopyMenuOpen(false);
+                        }}
+                        className="w-full flex items-center justify-between px-3.5 py-2 text-xs font-bold text-slate-200 hover:bg-slate-800 hover:text-[#D4AF37] transition-colors cursor-pointer border-t border-slate-800"
+                      >
+                        <span>🎓 اختتامیہ کاپی کریں</span>
+                      </button>
+                    )}
+
+                    {/* Option 3: Copy Full Book */}
+                    <button
+                      onClick={() => {
+                        handleCopyFullBook();
+                        setIsCopyMenuOpen(false);
+                      }}
+                      className="w-full flex items-center justify-between px-3.5 py-2 text-xs font-bold text-slate-200 hover:bg-slate-800 hover:text-[#D4AF37] transition-colors border-t border-slate-800 cursor-pointer"
+                    >
+                      <span>📚 مکمل کتاب کاپی کریں</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Image button in toolbar */}
+              {editorPage !== 'cover' && editorPage !== 'toc' && (
+                <button
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white font-bold font-urdu text-[11px] rounded-lg transition-all cursor-pointer"
+                >
+                  <span>🖼️ تصویر</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1028,13 +1460,9 @@ export const BookEditor: React.FC<BookEditorProps> = ({
           </div>
 
           {/* Quick Real-Time Selection Warning / Feedback */}
-          {toolbarError ? (
+          {toolbarError && (
             <div className="text-rose-400 text-xs font-bold px-3 py-1.5 bg-rose-500/10 border border-rose-500/20 rounded-xl animate-pulse self-start">
               {toolbarError}
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 text-slate-400 text-xs font-urdu self-start mt-0.5">
-              <span>مطلوبہ عبارت منتخب کریں اور فارمیٹ لاگو کریں۔</span>
             </div>
           )}
         </div>
@@ -1207,6 +1635,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                       dangerouslySetInnerHTML={{ __html: prefaceNote }}
                     />
                   </div>
+                  {renderA4ImageSection()}
                 </div>
 
                 {/* Footer */}
@@ -1391,7 +1820,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                         </div>
                       )}
                     </div>
-
+                    {renderA4ImageSection()}
                   </div>
 
                   {/* Footer */}
@@ -1441,6 +1870,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                       dangerouslySetInnerHTML={{ __html: conclusionNote }}
                     />
                   </div>
+                  {renderA4ImageSection()}
                 </div>
 
                 {/* Footer */}
@@ -1468,6 +1898,27 @@ export const BookEditor: React.FC<BookEditorProps> = ({
             <span>ترمیم محفوظ کریں اور فائنل کتاب دیکھیں</span>
           </button>
         </div>
+
+        {/* Global Hidden File Input for Image Uploads */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleImageUpload}
+          accept="image/*"
+          className="hidden"
+        />
+
+        {/* Custom Thin Caret Element */}
+        {caretPos.visible && (
+          <div
+            className="custom-caret"
+            style={{
+              top: `${caretPos.top}px`,
+              left: `${caretPos.left}px`,
+              height: `${caretPos.height}px`,
+            }}
+          />
+        )}
 
       </div>
     </section>
