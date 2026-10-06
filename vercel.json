@@ -1,35 +1,25 @@
 {
-  "version": 2,
-  "builds": [
+  "framework": "vite",
+  "rewrites": [
     {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
+      "source": "/api/:path*",
+      "destination": "/api"
     },
     {
-      "src": "server.ts",
-      "use": "@vercel/node"
+      "source": "/fonts/:path*",
+      "destination": "/api"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/index.html"
     }
   ],
   "functions": {
-    "server.ts": {
-      "includeFiles": "node_modules/@fontsource/**/files/*"
+    "api/index.ts": {
+      "includeFiles": "node_modules/@fontsource/**/files/*",
+      "maxDuration": 60,
+      "memory": 1024
     }
-  },
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "server.ts"
-    },
-    {
-      "src": "/fonts/(.*)",
-      "dest": "server.ts"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/$1"
-    }
-  ]
+  }
 }
+
