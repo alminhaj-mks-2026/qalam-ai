@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TranslationDictionary } from '../i18n/translations';
-import { ChapterOutline, StyleOverrides, CoverPageConfig, CoverLayout, PageImageConfig } from '../types';
+import { ChapterOutline, StyleOverrides, CoverPageConfig, CoverLayout, PageImageConfig, Taqreez, resolveAuthorRoleLabel } from '../types';
 import {
   Edit3,
   BookOpen,
@@ -30,7 +30,10 @@ import {
   Upload,
   User,
   RotateCcw,
-  Clipboard
+  Clipboard,
+  Scroll,
+  Plus,
+  Trash2
 } from 'lucide-react';
 
 export type FieldPath =
@@ -79,12 +82,18 @@ interface BookEditorProps {
   setSubtitle: (st: string) => void;
   authorName: string;
   setAuthorName: (a: string) => void;
+  authorRole?: string;
+  setAuthorRole?: (role: string) => void;
+  customAuthorRole?: string;
+  setCustomAuthorRole?: (role: string) => void;
   prefaceNote: string;
   setPrefaceNote: (p: string) => void;
   conclusionNote: string;
   setConclusionNote: (c: string) => void;
   chapters: ChapterOutline[];
   setChapters: React.Dispatch<React.SetStateAction<ChapterOutline[]>>;
+  taqreezat?: Taqreez[];
+  setTaqreezat?: React.Dispatch<React.SetStateAction<Taqreez[]>>;
   onDoneEditing: () => void;
   prefaceStyles: StyleOverrides;
   setPrefaceStyles: React.Dispatch<React.SetStateAction<StyleOverrides>>;
@@ -114,12 +123,18 @@ export const BookEditor: React.FC<BookEditorProps> = ({
   setSubtitle,
   authorName,
   setAuthorName,
+  authorRole = '',
+  setAuthorRole,
+  customAuthorRole = '',
+  setCustomAuthorRole,
   prefaceNote,
   setPrefaceNote,
   conclusionNote,
   setConclusionNote,
   chapters,
   setChapters,
+  taqreezat = [],
+  setTaqreezat,
   onDoneEditing,
   prefaceStyles,
   setPrefaceStyles,
@@ -1121,9 +1136,17 @@ export const BookEditor: React.FC<BookEditorProps> = ({
     );
   };
 
+  const validTaqreezat = (taqreezat || []).filter(
+    (t) => (t.endorserName && t.endorserName.trim()) || (t.text && t.text.trim())
+  );
+
   // NAVIGATION LIST
   const editorPagesList = [
     { id: 'cover', name: 'سرورق (Cover Page)' },
+    ...validTaqreezat.map((tq, idx) => ({
+      id: `taqreez_${idx}`,
+      name: `تقریظ ${validTaqreezat.length > 1 ? idx + 1 : ''}: ${tq.endorserName ? tq.endorserName.slice(0, 15) : 'اہل علم'}`,
+    })),
     { id: 'title_page', name: 'پیش لفظ (Title & Preface)' },
     { id: 'toc', name: 'فہرستِ مضامین (Table of Contents)' },
     ...chapters.map((_, idx) => ({ id: `chapter_${idx + 1}`, name: `باب ${idx + 1}` })),
@@ -1482,6 +1505,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
               }`}
             >
               {pg.id === 'cover' && '📘 '}
+              {pg.id.startsWith('taqreez_') && '📜 '}
               {pg.id === 'title_page' && '📝 '}
               {pg.id === 'toc' && '📋 '}
               {pg.id.startsWith('chapter_') && '📖 '}

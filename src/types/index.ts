@@ -6,10 +6,45 @@ export type BookGenre = 'academic' | 'islamic' | 'literary' | 'self_help' | 'bus
 
 export type CoverLayout = 'classic_gold' | 'modern_minimal' | 'royal_islamic' | 'academic_slate' | 'minimal_dark';
 
+export interface Taqreez {
+  id: string;
+  endorserName: string;
+  endorserTitle?: string;
+  text: string;
+}
+
+export const AUTHOR_ROLE_OPTIONS = [
+  'مصنف',
+  'مؤلف',
+  'مرتب',
+  'مترجم',
+  'شارح',
+  'محقق',
+  'مدوّن',
+  'تحقیق و تخریج',
+  'تالیف و ترتیب',
+  'ترجمہ و تحقیق',
+  'دیگر',
+] as const;
+
+export type AuthorRoleOption = typeof AUTHOR_ROLE_OPTIONS[number];
+
+export function resolveAuthorRoleLabel(role?: string, customRole?: string): string {
+  if (!role || !role.trim()) {
+    return 'مصنّف';
+  }
+  if (role === 'دیگر') {
+    return customRole?.trim() || 'مصنّف';
+  }
+  return role.trim();
+}
+
 export interface CoverPageConfig {
   title: string;
   subtitle: string;
   authorName: string;
+  authorRole?: string;
+  customAuthorRole?: string;
   additionalText: string;
   logoUrl?: string;
   layout: CoverLayout;
@@ -93,11 +128,14 @@ export interface BookMetadata {
   title: string;
   subtitle: string;
   authorName: string;
+  authorRole?: string;
+  customAuthorRole?: string;
   genre: BookGenre;
   targetChaptersCount: number;
   rawTextContent: string;
   attachedFiles: AttachedFile[];
   prefaceNote: string;
+  taqreezat?: Taqreez[];
   chapters: ChapterOutline[];
   conclusionNote: string;
   generatedBook?: GeneratedBookData;
@@ -108,8 +146,11 @@ export interface BookPdfParams {
   title: string;
   subtitle: string;
   authorName: string;
+  authorRole?: string;
+  customAuthorRole?: string;
   genre?: string;
   prefaceNote: string;
+  taqreezat?: Taqreez[];
   conclusionNote: string;
   chapters: ChapterOutline[];
   prefaceStyles?: StyleOverrides;

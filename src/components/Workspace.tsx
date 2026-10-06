@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { TranslationDictionary } from '../i18n/translations';
-import { InputMode, BookGenre, AttachedFile } from '../types';
+import { InputMode, BookGenre, AttachedFile, Taqreez, AUTHOR_ROLE_OPTIONS } from '../types';
 import { SupportedGeminiModel } from '../config/models';
 import {
   FileText,
@@ -18,7 +18,11 @@ import {
   Clock,
   Sparkles,
   Zap,
-  X
+  X,
+  Scroll,
+  Plus,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 export interface QuotaErrorInfo {
@@ -39,8 +43,14 @@ interface WorkspaceProps {
   setTitle: (title: string) => void;
   authorName: string;
   setAuthorName: (name: string) => void;
+  authorRole?: string;
+  setAuthorRole?: (role: string) => void;
+  customAuthorRole?: string;
+  setCustomAuthorRole?: (role: string) => void;
   genre: BookGenre;
   setGenre: (genre: BookGenre) => void;
+  taqreezat?: Taqreez[];
+  setTaqreezat?: React.Dispatch<React.SetStateAction<Taqreez[]>>;
   attachedFiles: AttachedFile[];
   setAttachedFiles: React.Dispatch<React.SetStateAction<AttachedFile[]>>;
   onGenerateBook: () => void;
@@ -62,8 +72,14 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   setTitle,
   authorName,
   setAuthorName,
+  authorRole = '',
+  setAuthorRole,
+  customAuthorRole = '',
+  setCustomAuthorRole,
   genre,
   setGenre,
+  taqreezat = [],
+  setTaqreezat,
   attachedFiles,
   setAttachedFiles,
   onGenerateBook,
@@ -76,6 +92,9 @@ export const Workspace: React.FC<WorkspaceProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+
+  // Taqreez Section Open/Collapse State (opens automatically if taqreezat exist)
+  const [isTaqreezOpen, setIsTaqreezOpen] = useState<boolean>(taqreezat.length > 0);
 
   // Live Microphone Recording States
   const [isRecording, setIsRecording] = useState(false);
@@ -213,6 +232,30 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const handleAddTaqreez = () => {
+    if (!setTaqreezat) return;
+    const newTaqreez: Taqreez = {
+      id: Math.random().toString(36).substring(2, 9),
+      endorserName: '',
+      endorserTitle: '',
+      text: '',
+    };
+    setTaqreezat((prev) => [...prev, newTaqreez]);
+    setIsTaqreezOpen(true);
+  };
+
+  const handleUpdateTaqreez = (id: string, field: keyof Taqreez, val: string) => {
+    if (!setTaqreezat) return;
+    setTaqreezat((prev) =>
+      prev.map((tq) => (tq.id === id ? { ...tq, [field]: val } : tq))
+    );
+  };
+
+  const handleDeleteTaqreez = (id: string) => {
+    if (!setTaqreezat) return;
+    setTaqreezat((prev) => prev.filter((tq) => tq.id !== id));
+  };
+
   return (
     <section id="workspace" className="py-8 px-4 sm:px-6 bg-white border-y border-slate-200/80">
       <div className="max-w-4xl mx-auto space-y-6">
@@ -228,49 +271,223 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         </div>
 
         {/* Book Title, Author & Genre Configuration */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 bg-[#FBF9F5] p-4 rounded-xl border border-slate-200">
-          <div>
-            <label className="block text-xs font-bold font-urdu text-slate-700 mb-1">
-              کتاب کا عنوان (اختِیاری)
-            </label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="مثلاً: حکمتِ قلم اور جدید سائنس"
-              className="w-full px-3.5 py-2 text-xs sm:text-sm font-urdu bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A]"
-            />
+        <div className="bg-[#FBF9F5] p-4 rounded-xl border border-slate-200 space-y-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+            <div>
+              <label className="block text-xs font-bold font-urdu text-slate-700 mb-1">
+                کتاب کا عنوان (اختِیاری)
+              </label>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="مثلاً: حکمتِ قلم اور جدید سائنس"
+                className="w-full px-3.5 py-2 text-xs sm:text-sm font-urdu bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A]"
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold font-urdu text-slate-700">
+                  {t.authorLabel}
+                </label>
+                <span className="text-[11px] font-urdu text-slate-500">حیثیت (اختیاری)</span>
+              </div>
+              <div className="space-y-1.5">
+                <input
+                  type="text"
+                  value={authorName}
+                  onChange={(e) => setAuthorName(e.target.value)}
+                  placeholder={t.authorPlaceholder}
+                  className="w-full px-3.5 py-2 text-xs sm:text-sm font-urdu bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A]"
+                />
+                
+                {/* 1. مصنف/مؤلف کی حیثیت کا اختیار (Author Role) */}
+                <select
+                  value={authorRole}
+                  onChange={(e) => setAuthorRole && setAuthorRole(e.target.value)}
+                  className="w-full px-3 py-1.5 text-xs font-urdu bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A] text-slate-700"
+                  title="مصنف کی حیثیت"
+                >
+                  <option value="">-- مصنف کی حیثیت (اختیاری) --</option>
+                  {AUTHOR_ROLE_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+
+                {authorRole === 'دیگر' && (
+                  <input
+                    type="text"
+                    value={customAuthorRole}
+                    onChange={(e) => setCustomAuthorRole && setCustomAuthorRole(e.target.value)}
+                    placeholder="اپنی حیثیت درج کریں (مثلاً: نگران، اشاعت و طباعت)"
+                    className="w-full px-3 py-1.5 text-xs font-urdu bg-amber-50/70 border border-amber-300 rounded-lg focus:outline-none focus:border-[#0F172A] text-slate-800 placeholder-slate-400 animate-fade-in"
+                  />
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold font-urdu text-slate-700 mb-1">
+                {t.genreLabel}
+              </label>
+              <select
+                value={genre}
+                onChange={(e) => setGenre(e.target.value as BookGenre)}
+                className="w-full px-3.5 py-2 text-xs sm:text-sm font-urdu bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A]"
+              >
+                {genresList.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* 2 & 3. تقریظ کا نیا Optional Section (Endorsements / Forewords) */}
+        <div className="bg-[#FAF8F5] border border-amber-300/80 rounded-xl overflow-hidden shadow-2xs transition-all">
+          <div
+            onClick={() => setIsTaqreezOpen(!isTaqreezOpen)}
+            className="p-3.5 sm:p-4 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent flex items-center justify-between cursor-pointer hover:bg-amber-100/50 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Scroll className="w-4 h-4 text-[#D4AF37]" />
+              <h3 className="text-xs sm:text-sm font-bold font-urdu text-[#0F172A] flex items-center gap-1.5">
+                <span>📜 تقریظ شامل کریں</span>
+                <span className="text-[11px] font-normal text-slate-500">(اختیاری)</span>
+              </h3>
+              {taqreezat.length > 0 && (
+                <span className="px-2 py-0.5 bg-[#0F172A] text-[#D4AF37] font-bold text-[10px] rounded-full font-mono">
+                  {taqreezat.length}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 text-slate-600">
+              <span className="text-xs font-urdu hidden sm:inline text-slate-500">
+                {isTaqreezOpen ? 'بند کریں' : 'دیکھیں و شامل کریں'}
+              </span>
+              {isTaqreezOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-bold font-urdu text-slate-700 mb-1">
-              {t.authorLabel}
-            </label>
-            <input
-              type="text"
-              value={authorName}
-              onChange={(e) => setAuthorName(e.target.value)}
-              placeholder={t.authorPlaceholder}
-              className="w-full px-3.5 py-2 text-xs sm:text-sm font-urdu bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A]"
-            />
-          </div>
+          {isTaqreezOpen && (
+            <div className="p-4 pt-1 space-y-4 border-t border-amber-200/60 bg-white/70">
+              <p className="text-xs font-urdu text-slate-600 leading-relaxed">
+                کتاب کے ابتدائی صفحات میں بزرگوں، اساتذہ یا اہل علم کی تقریظ و کلماتِ تحسین شامل کریں۔ آپ کا درج کردہ اصل متن من و عن بغیر کسی خلاصے یا تبدیلی کے محفوظ رہے گا۔
+              </p>
 
-          <div>
-            <label className="block text-xs font-bold font-urdu text-slate-700 mb-1">
-              {t.genreLabel}
-            </label>
-            <select
-              value={genre}
-              onChange={(e) => setGenre(e.target.value as BookGenre)}
-              className="w-full px-3.5 py-2 text-xs sm:text-sm font-urdu bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A]"
-            >
-              {genresList.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.label}
-                </option>
-              ))}
-            </select>
-          </div>
+              {/* Taqreezat Records List */}
+              {taqreezat.length > 0 ? (
+                <div className="space-y-4">
+                  {taqreezat.map((tq, idx) => (
+                    <div
+                      key={tq.id}
+                      className="p-3.5 sm:p-4 bg-white border border-amber-200/90 rounded-xl shadow-2xs space-y-3 relative group"
+                    >
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                        <span className="text-xs font-bold font-urdu text-amber-900 flex items-center gap-1.5">
+                          <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-800 text-[11px] flex items-center justify-center font-bold">
+                            {idx + 1}
+                          </span>
+                          <span>تقریظ {idx + 1}</span>
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTaqreez(tq.id)}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg transition-colors font-urdu cursor-pointer"
+                          title="یہ تقریظ حذف کریں"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>حذف کریں</span>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {/* تقریظ کنندہ کا نام */}
+                        <div>
+                          <label className="block text-xs font-bold font-urdu text-slate-700 mb-1">
+                            تقریظ کنندہ کا نام
+                          </label>
+                          <input
+                            type="text"
+                            value={tq.endorserName}
+                            onChange={(e) => handleUpdateTaqreez(tq.id, 'endorserName', e.target.value)}
+                            placeholder="مثلاً: حضرت مولانا مفتی تقی عثمانی مدظلہم"
+                            className="w-full px-3 py-1.5 text-xs sm:text-sm font-urdu bg-[#FAF8F5] border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A]"
+                          />
+                        </div>
+
+                        {/* تعارف / عہدہ */}
+                        <div>
+                          <label className="block text-xs font-bold font-urdu text-slate-700 mb-1">
+                            عہدہ یا مختصر تعارف (اختیاری)
+                          </label>
+                          <input
+                            type="text"
+                            value={tq.endorserTitle || ''}
+                            onChange={(e) => handleUpdateTaqreez(tq.id, 'endorserTitle', e.target.value)}
+                            placeholder="مثلاً: شیخ الحدیث و نائب صدر دار العلوم کراچی"
+                            className="w-full px-3 py-1.5 text-xs sm:text-sm font-urdu bg-[#FAF8F5] border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A]"
+                          />
+                        </div>
+                      </div>
+
+                      {/* تقریظ کا متن */}
+                      <div>
+                        <label className="block text-xs font-bold font-urdu text-slate-700 mb-1">
+                          یہاں تقریظ کا اصل متن درج کریں
+                        </label>
+                        <textarea
+                          rows={4}
+                          value={tq.text}
+                          onChange={(e) => handleUpdateTaqreez(tq.id, 'text', e.target.value)}
+                          placeholder="یہاں تقریظ کا اصل متن درج کریں۔ عربی آیات، احادیث، اعراب اور دعائیہ کلمات مکمل محفوظ رہیں گے..."
+                          className="w-full p-3 text-xs sm:text-sm font-urdu leading-relaxed bg-[#FAF8F5] border border-slate-300 rounded-lg focus:outline-none focus:border-[#0F172A] resize-y"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-4 text-center border-2 border-dashed border-amber-200 rounded-xl bg-amber-50/30">
+                  <p className="text-xs font-urdu text-slate-600 mb-2">
+                    ابھی تک کوئی تقریظ شامل نہیں کی گئی۔
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleAddTaqreez}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#0F172A] text-[#D4AF37] text-xs font-bold font-urdu rounded-lg shadow-2xs hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>پہلی تقریظ شامل کریں</span>
+                  </button>
+                </div>
+              )}
+
+              {/* 3. ایک سے زیادہ تقریظیں: + مزید تقریظ کا بٹن */}
+              {taqreezat.length > 0 && (
+                <div className="pt-1 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={handleAddTaqreez}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#0F172A] text-[#D4AF37] text-xs font-bold font-urdu rounded-lg shadow-2xs hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ مزید تقریظ</span>
+                  </button>
+                  <span className="text-[11px] font-urdu text-slate-500">
+                    مجموعی تقاریظ: {taqreezat.length}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Input Mode Tabs */}

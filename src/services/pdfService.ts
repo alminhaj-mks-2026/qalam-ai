@@ -1,4 +1,4 @@
-import { ChapterOutline, GeneratedBookData, CoverPageConfig, BookPdfParams, StyleOverrides } from '../types';
+import { ChapterOutline, GeneratedBookData, CoverPageConfig, BookPdfParams, StyleOverrides, resolveAuthorRoleLabel, Taqreez } from '../types';
 import { sanitizeBookHeading, cleanFinalBookContent } from './manuscriptCleaner';
 import { formatScriptAwareHtml } from './scriptTypography';
 
@@ -67,7 +67,7 @@ function computeBookHash(params: BookPdfParams): string {
     .join('|');
 
   const coverSig = params.coverConfig
-    ? `${params.coverConfig.title}_${params.coverConfig.subtitle}_${params.coverConfig.authorName}_${params.coverConfig.layout}_${params.coverConfig.themeColor}_${params.coverConfig.backgroundColor}_${params.coverConfig.alignment}`
+    ? `${params.coverConfig.title}_${params.coverConfig.subtitle}_${params.coverConfig.authorName}_${params.coverConfig.authorRole || ''}_${params.coverConfig.customAuthorRole || ''}_${params.coverConfig.layout}_${params.coverConfig.themeColor}_${params.coverConfig.backgroundColor}_${params.coverConfig.alignment}`
     : 'default_cover';
 
   const prefaceSig = serializeStyles(params.prefaceStyles);
@@ -76,7 +76,13 @@ function computeBookHash(params: BookPdfParams): string {
   const prefImageSig = params.prefaceImage ? `${params.prefaceImage.width}_${params.prefaceImage.alignment}_${params.prefaceImage.xOffset}_${params.prefaceImage.yOffset}_${params.prefaceImage.url.slice(-30)}` : 'no_pref_img';
   const conclImageSig = params.conclusionImage ? `${params.conclusionImage.width}_${params.conclusionImage.alignment}_${params.conclusionImage.xOffset}_${params.conclusionImage.yOffset}_${params.conclusionImage.url.slice(-30)}` : 'no_concl_img';
 
-  return `${params.title}_${params.subtitle}_${params.authorName}_${chapterSig}_${params.bodyFontSize || 16}_${params.pageSize || 'A4'}_${params.orientation || 'portrait'}_${coverSig}_${params.prefaceNote || ''}_${prefaceSig}_${prefImageSig}_${params.conclusionNote || ''}_${conclusionSig}_${conclImageSig}`;
+  const taqreezatSig = (params.taqreezat || [])
+    .map((t) => `${t.id}:${t.endorserName}:${t.endorserTitle || ''}:${t.text}`)
+    .join('|');
+
+  const roleSig = `${params.authorRole || ''}_${params.customAuthorRole || ''}`;
+
+  return `${params.title}_${params.subtitle}_${params.authorName}_${roleSig}_${chapterSig}_${params.bodyFontSize || 16}_${params.pageSize || 'A4'}_${params.orientation || 'portrait'}_${coverSig}_${params.prefaceNote || ''}_${prefaceSig}_${prefImageSig}_${taqreezatSig}_${params.conclusionNote || ''}_${conclusionSig}_${conclImageSig}`;
 }
 
 function removeRepeatedHeading(contentStr: string, headingToCompare: string): string {
@@ -147,11 +153,19 @@ export async function createBookPdfBlob(
   const cleanTitle = sanitizeBookHeading(params.title || 'کتاب', 'کتاب');
   const cleanSubtitle = sanitizeBookHeading(params.subtitle || '', '');
   const cleanAuthor = (params.authorName || 'عبد الحفیظ').trim();
+  const cleanAuthorRole = resolveAuthorRoleLabel(
+    params.authorRole || params.coverConfig?.authorRole,
+    params.customAuthorRole || params.coverConfig?.customAuthorRole
+  );
   const coverBg = params.coverConfig?.backgroundColor || '#0F172A';
   const themeColor = params.coverConfig?.themeColor || '#D4AF37';
   const textAlign = params.coverConfig?.alignment || 'center';
   const showWatermark = params.coverConfig?.showWatermark !== false && params.showWatermark !== false;
   const bodyFontSize = params.bodyFontSize || 15;
+
+  const validTaqreezat = (params.taqreezat || []).filter(
+    (t) => (t.endorserName && t.endorserName.trim()) || (t.text && t.text.trim())
+  );
 
   // Subtle, elegant geometric ornament SVG for the title page
   const geometricOrnamentSvg = `
@@ -300,6 +314,55 @@ export async function createBookPdfBlob(
       font-size: 24px;
       font-weight: bold;
       color: #ffffff;
+    }
+
+    /* 1.5. Taqreez (Endorsements) Pages */
+    .taqreez-page {
+      page-break-after: always;
+      break-after: page;
+      padding: 6mm 8mm;
+      box-sizing: border-box;
+    }
+
+    .taqreez-header-badge {
+      color: ${themeColor};
+      font-weight: bold;
+      font-size: 13px;
+      text-align: center;
+      margin-top: 8px;
+      margin-bottom: 4px;
+      letter-spacing: 1px;
+    }
+
+    .taqreez-endorser-box {
+      text-align: center;
+      margin-bottom: 12px;
+    }
+
+    .taqreez-endorser-name {
+      font-size: 22px;
+      font-weight: bold;
+      color: #0f172a;
+      font-family: 'Noto Nastaliq Urdu', serif;
+      line-height: 1.5;
+    }
+
+    .taqreez-endorser-title {
+      font-size: 13px;
+      color: #475569;
+      margin-top: 3px;
+      font-family: 'Noto Nastaliq Urdu', serif;
+    }
+
+    .taqreez-divider {
+      display: flex;
+      justify-content: center;
+      margin: 10px 0 16px 0;
+    }
+
+    .taqreez-body-text {
+      font-size: ${bodyFontSize}px;
+      line-height: 2.15;
     }
 
     /* 2. Table of Contents Page */
@@ -527,14 +590,41 @@ export async function createBookPdfBlob(
     </div>
 
     <div class="cover-bottom">
-       <div class="cover-author-label">مصنّف</div>
+       <div class="cover-author-label">${cleanAuthorRole}</div>
        <div class="cover-author">${cleanAuthor}</div>
     </div>
   </div>
 
+  <!-- 1.5. Taqreez (Endorsements) Section: Placed immediately after Cover -->
+  ${validTaqreezat.length > 0 ? validTaqreezat.map((tq, tqIdx) => `
+  <div class="taqreez-page">
+    <div class="taqreez-header-badge">تقریظِ با برکت ${validTaqreezat.length > 1 ? `(${tqIdx + 1})` : ''}</div>
+    <div class="taqreez-endorser-box">
+      <div class="taqreez-endorser-name">${tq.endorserName}</div>
+      ${tq.endorserTitle ? `<div class="taqreez-endorser-title">${tq.endorserTitle}</div>` : ''}
+    </div>
+    <div class="taqreez-divider">
+      <svg width="48" height="12" viewBox="0 0 48 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <line x1="0" y1="6" x2="18" y2="6" stroke="${themeColor}" stroke-width="1"/>
+        <circle cx="24" cy="6" r="3" fill="${themeColor}"/>
+        <line x1="30" y1="6" x2="48" y2="6" stroke="${themeColor}" stroke-width="1"/>
+      </svg>
+    </div>
+    <div class="body-text taqreez-body-text">
+      ${formatParagraphsForPdf(tq.text)}
+    </div>
+  </div>
+  `).join('') : ''}
+
   <!-- 2. Table of Contents Page -->
   <div class="toc-page">
     <div class="toc-title">فہرستِ مضامین</div>
+    ${validTaqreezat.length > 0 ? validTaqreezat.map((tq, idx) => `
+    <div class="toc-item">
+      <span class="toc-title-text">تقریظ: ${tq.endorserName}${tq.endorserTitle ? ` (${tq.endorserTitle})` : ''}</span>
+      <span class="toc-dots"></span>
+      <span>تقریظ ${validTaqreezat.length > 1 ? idx + 1 : ''}</span>
+    </div>`).join('') : ''}
     ${params.prefaceNote && params.prefaceNote.trim() ? `
     <div class="toc-item">
       <span class="toc-title-text">پیش لفظ و دیباچہ</span>

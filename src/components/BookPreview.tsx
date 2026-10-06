@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { TranslationDictionary } from '../i18n/translations';
-import { PreviewPage, ChapterOutline, BookGenre, CoverPageConfig, CoverLayout, StyleOverrides, PageImageConfig } from '../types';
+import { PreviewPage, ChapterOutline, BookGenre, CoverPageConfig, CoverLayout, StyleOverrides, PageImageConfig, Taqreez, AUTHOR_ROLE_OPTIONS, resolveAuthorRoleLabel } from '../types';
 import { QuotaErrorInfo } from './Workspace';
 import { SupportedGeminiModel } from '../config/models';
 import { renderScriptAwareReactParagraphs } from '../services/scriptTypography';
@@ -34,7 +34,10 @@ import {
   Zap,
   FileDown,
   Share2,
-  Loader2
+  Loader2,
+  Scroll,
+  Plus,
+  Trash2
 } from 'lucide-react';
 
 interface BookPreviewProps {
@@ -45,11 +48,17 @@ interface BookPreviewProps {
   setSubtitle?: (subtitle: string) => void;
   authorName: string;
   setAuthorName?: (authorName: string) => void;
+  authorRole?: string;
+  setAuthorRole?: (role: string) => void;
+  customAuthorRole?: string;
+  setCustomAuthorRole?: (role: string) => void;
   genre: BookGenre;
   rawText: string;
   prefaceNote: string;
   conclusionNote: string;
   chapters: ChapterOutline[];
+  taqreezat?: Taqreez[];
+  setTaqreezat?: React.Dispatch<React.SetStateAction<Taqreez[]>>;
   prefaceStyles?: StyleOverrides;
   conclusionStyles?: StyleOverrides;
   bodyFontSize?: number;
@@ -85,11 +94,17 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
   setSubtitle,
   authorName,
   setAuthorName,
+  authorRole = '',
+  setAuthorRole,
+  customAuthorRole = '',
+  setCustomAuthorRole,
   genre,
   rawText,
   prefaceNote,
   conclusionNote,
   chapters,
+  taqreezat = [],
+  setTaqreezat,
   prefaceStyles,
   conclusionStyles,
   bodyFontSize: externalBodyFontSize,
@@ -120,7 +135,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [isFullScreen, setIsFullScreen] = useState<boolean>(isOpenModal);
   const [isTypographyOpen, setIsTypographyOpen] = useState<boolean>(false);
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'title' | 'cover' | 'layout'>('title');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'title' | 'taqreez' | 'cover' | 'layout'>('title');
   const [isTocPanelOpen, setIsTocPanelOpen] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
 
@@ -205,9 +220,14 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
   const sectionHeadingFontSize = Math.max(16, Math.round(effectiveFontSize * 1.25));
   const subheadingFontSize = Math.max(14, Math.round(effectiveFontSize * 1.1));
 
-  // Dynamic page order based on chapters list
+  // Dynamic page order based on chapters list and optional taqreezat
+  const validTaqreezat = (taqreezat || []).filter(
+    (t) => (t.endorserName && t.endorserName.trim()) || (t.text && t.text.trim())
+  );
+  const taqreezPages = validTaqreezat.map((_, idx) => `taqreez_${idx}`);
+
   const chapterPages = (chapters || []).map((_, idx) => `chapter_${idx + 1}`);
-  const pageOrder: PreviewPage[] = ['cover', 'title_page', 'toc', ...chapterPages, 'conclusion'];
+  const pageOrder: PreviewPage[] = ['cover', ...taqreezPages, 'title_page', 'toc', ...chapterPages, 'conclusion'];
 
   // Ensure current page is valid when chapters change
   const currentIdx = pageOrder.indexOf(currentPage) !== -1 ? pageOrder.indexOf(currentPage) : 0;
@@ -399,9 +419,63 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                 style={{ color: coverConfig?.themeColor || '#D4AF37' }}
                 className="text-[11px] font-brand uppercase tracking-wider"
               >
-                مصنّف
+                {resolveAuthorRoleLabel(coverConfig?.authorRole || authorRole, coverConfig?.customAuthorRole || customAuthorRole)}
               </p>
               <h3 className="text-base sm:text-xl font-bold font-urdu text-white">{displayAuthor}</h3>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* 1.5. Taqreez (Endorsements) Page Rendering */
+    if (currentPage.startsWith('taqreez_')) {
+      const tqIdx = parseInt(currentPage.replace('taqreez_', ''), 10);
+      const tq = validTaqreezat[tqIdx];
+      if (!tq) return null;
+
+      const pageNum = tqIdx + 1;
+
+      return (
+        <div className={containerClass}>
+          <div className="w-full h-full border border-[#D4AF37]/80 rounded-xl p-4 sm:p-6 flex flex-col justify-between relative bg-white/70">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-3 text-[11px] text-slate-500 font-urdu">
+              <span className="text-[#D4AF37] font-bold">{showWatermark ? 'Qalam AI' : ''}</span>
+              <span className="font-bold text-slate-700">{displayTitle}</span>
+              <span>تقریظ {validTaqreezat.length > 1 ? toUrduDigits(tqIdx + 1) : ''}</span>
+            </div>
+
+            {/* Main Content */}
+            <div className="pt-2 space-y-3 flex-1 overflow-y-auto font-urdu text-right">
+              <div className="text-center space-y-1 border-b border-slate-200 pb-3">
+                <span className="text-[11px] font-bold text-[#D4AF37] tracking-wider block">
+                  تقریظِ با برکت {validTaqreezat.length > 1 ? `(${toUrduDigits(tqIdx + 1)})` : ''}
+                </span>
+                <h3 className="text-lg sm:text-xl font-bold text-[#0F172A] leading-relaxed">
+                  {tq.endorserName || 'تقریظ کنندہ'}
+                </h3>
+                {tq.endorserTitle && (
+                  <p className="text-xs text-slate-600 font-urdu mt-0.5">
+                    {tq.endorserTitle}
+                  </p>
+                )}
+                <div className="w-16 h-0.5 bg-[#D4AF37] mx-auto mt-2" />
+              </div>
+
+              {/* Taqreez Original Body Text (Verbatim, Script-Aware, Arabic/Urdu preserved) */}
+              <div className="p-3.5 bg-amber-50/50 border border-amber-200/80 rounded-xl text-slate-800 leading-relaxed shadow-2xs">
+                {renderBookParagraphs(tq.text || 'تقریظ کا متن درج نہیں کیا گیا ہے۔', effectiveFontSize)}
+              </div>
+            </div>
+
+            {/* Footer with Page Number */}
+            <div className="flex items-center justify-between border-t border-slate-200 pt-2.5 mt-3 text-[11px] text-slate-500 font-urdu">
+              <span>{showWatermark ? 'Qalam AI' : ''}</span>
+              <span className="font-bold text-slate-800 px-2.5 py-0.5 bg-slate-100 rounded border border-slate-300">
+                صفحہ {toUrduDigits(pageNum)}
+              </span>
+              <span>تقریظ</span>
             </div>
           </div>
         </div>
@@ -441,7 +515,9 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
               <div className="w-16 h-0.5 bg-[#D4AF37] mx-auto my-3" />
 
               <div className="pt-0.5">
-                <p className="text-xs font-urdu text-slate-500">مصنف:</p>
+                <p className="text-xs font-urdu text-slate-500">
+                  {resolveAuthorRoleLabel(coverConfig?.authorRole || authorRole, coverConfig?.customAuthorRole || customAuthorRole)}:
+                </p>
                 <p className="text-sm sm:text-base font-bold font-urdu text-[#0F172A] mt-0.5">{displayAuthor}</p>
               </div>
 
@@ -460,7 +536,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
             <div className="flex items-center justify-between border-t border-slate-200 pt-2.5 mt-3 text-[11px] text-slate-500 font-urdu">
               <span>{showWatermark ? 'Qalam AI' : ''}</span>
               <span className="font-bold text-slate-800 px-2.5 py-0.5 bg-slate-100 rounded border border-slate-300">
-                صفحہ {toUrduDigits(1)}
+                صفحہ {toUrduDigits(validTaqreezat.length + 1)}
               </span>
               <span>عنوان و پیش لفظ</span>
             </div>
@@ -493,6 +569,19 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
               </div>
 
               <div className="space-y-2 font-urdu">
+                {validTaqreezat.map((tq, idx) => (
+                  <div 
+                    key={tq.id || idx}
+                    onClick={() => setCurrentPage(`taqreez_${idx}`)}
+                    className="flex items-center justify-between font-bold text-slate-800 py-1.5 cursor-pointer hover:text-[#D4AF37] active:scale-99 transition-all" 
+                    style={{ fontSize: `${subheadingFontSize}px` }}
+                  >
+                    <span className="text-right">تقریظ: {tq.endorserName}{tq.endorserTitle ? ` (${tq.endorserTitle})` : ''}</span>
+                    <span className="flex-1 border-b border-dotted border-slate-400 mx-2" />
+                    <span className="font-bold text-slate-600 text-xs shrink-0">صفحہ {toUrduDigits(idx + 1)}</span>
+                  </div>
+                ))}
+
                 <div 
                   onClick={() => setCurrentPage('title_page')}
                   className="flex items-center justify-between font-bold text-slate-800 py-1.5 cursor-pointer hover:text-[#D4AF37] active:scale-99 transition-all" 
@@ -500,7 +589,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                 >
                   <span className="text-right">دیباچہ و پیش لفظ</span>
                   <span className="flex-1 border-b border-dotted border-slate-400 mx-2" />
-                  <span className="font-bold text-slate-600 text-xs shrink-0">صفحہ {toUrduDigits(1)}</span>
+                  <span className="font-bold text-slate-600 text-xs shrink-0">صفحہ {toUrduDigits(validTaqreezat.length + 1)}</span>
                 </div>
 
                 {(chapters || []).map((chap, idx) => (
@@ -512,7 +601,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                     >
                       <span className="text-right">{chap.title}</span>
                       <span className="flex-1 border-b border-dotted border-slate-400 mx-2" />
-                      <span className="font-bold text-slate-600 text-xs shrink-0">صفحہ {toUrduDigits(idx + 2)}</span>
+                      <span className="font-bold text-slate-600 text-xs shrink-0">صفحہ {toUrduDigits(validTaqreezat.length + idx + 2)}</span>
                     </div>
 
                     {chap.subheadings && chap.subheadings.length > 0 && (
@@ -534,7 +623,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                 >
                   <span className="text-right">اختتامیہ و حاصلِ کلام</span>
                   <span className="flex-1 border-b border-dotted border-slate-400 mx-2" />
-                  <span className="font-bold text-slate-600 text-xs shrink-0">صفحہ {toUrduDigits((chapters || []).length + 2)}</span>
+                  <span className="font-bold text-slate-600 text-xs shrink-0">صفحہ {toUrduDigits(validTaqreezat.length + (chapters || []).length + 2)}</span>
                 </div>
               </div>
             </div>
@@ -543,7 +632,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
             <div className="flex items-center justify-between border-t border-slate-200 pt-2.5 mt-3 text-[11px] text-slate-500 font-urdu">
               <span>{showWatermark ? 'Qalam AI' : ''}</span>
               <span className="font-bold text-slate-800 px-2.5 py-0.5 bg-slate-100 rounded border border-slate-300">
-                صفحہ {toUrduDigits(2)}
+                صفحہ {toUrduDigits(validTaqreezat.length + 2)}
               </span>
               <span>فہرستِ مضامین</span>
             </div>
@@ -555,7 +644,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
     if (currentPage.startsWith('chapter_')) {
       const chIdx = parseInt(currentPage.replace('chapter_', ''), 10) - 1;
       const currentChap = (chapters || [])[chIdx] || (chapters || [])[0];
-      const pageNum = chIdx + 3;
+      const pageNum = validTaqreezat.length + chIdx + 3;
 
       return (
         <div className={containerClass}>
@@ -652,7 +741,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
     }
 
     if (currentPage === 'conclusion') {
-      const pageNum = (chapters || []).length + 3;
+      const pageNum = validTaqreezat.length + (chapters || []).length + 3;
       return (
         <div className={containerClass}>
           <div className="w-full h-full border border-[#D4AF37]/80 rounded-xl p-4 sm:p-6 flex flex-col justify-between relative bg-white/70">
@@ -746,6 +835,24 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
         >
           سرورق
         </button>
+        {validTaqreezat.length > 0 && (
+          <button
+            onClick={() => setCurrentPage('taqreez_0')}
+            className={`px-2 py-1 rounded text-[11px] whitespace-nowrap cursor-pointer ${
+              currentPage.startsWith('taqreez_') ? 'bg-[#D4AF37] text-[#0F172A] font-bold' : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            تقریظ
+          </button>
+        )}
+        <button
+          onClick={() => setCurrentPage('title_page')}
+          className={`px-2 py-1 rounded text-[11px] whitespace-nowrap cursor-pointer ${
+            currentPage === 'title_page' ? 'bg-[#D4AF37] text-[#0F172A] font-bold' : 'text-slate-300 hover:text-white'
+          }`}
+        >
+          پیش لفظ
+        </button>
         <button
           onClick={() => setCurrentPage('toc')}
           className={`px-2 py-1 rounded text-[11px] whitespace-nowrap cursor-pointer ${
@@ -827,13 +934,23 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                 </button>
 
                 <button
+                  onClick={() => setActiveSettingsTab('taqreez')}
+                  className={`flex-1 py-1.5 px-2 text-xs font-bold font-urdu rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1 ${
+                    activeSettingsTab === 'taqreez' ? 'bg-[#D4AF37] text-[#0F172A]' : 'text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  <Scroll className="w-3.5 h-3.5" />
+                  <span>تقریظ ({validTaqreezat.length})</span>
+                </button>
+
+                <button
                   onClick={() => setActiveSettingsTab('cover')}
                   className={`flex-1 py-1.5 px-2 text-xs font-bold font-urdu rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1 ${
                     activeSettingsTab === 'cover' ? 'bg-[#D4AF37] text-[#0F172A]' : 'text-slate-300 hover:bg-slate-800'
                   }`}
                 >
                   <Palette className="w-3.5 h-3.5" />
-                  <span>سرورق (Cover)</span>
+                  <span>سرورق</span>
                 </button>
 
                 <button
@@ -843,7 +960,7 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                   }`}
                 >
                   <Layers className="w-3.5 h-3.5" />
-                  <span>صفحہ و فونٹس</span>
+                  <span>صفحہ بندی</span>
                 </button>
               </div>
 
@@ -907,7 +1024,136 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                           className="w-full px-3 py-2 text-xs font-urdu bg-slate-800 border border-slate-700 text-white rounded-lg focus:outline-none focus:border-[#D4AF37]"
                         />
                       </div>
+
+                      {/* 1. مصنف/مؤلف کی حیثیت کا اختیار (Author Role) */}
+                      <div>
+                        <label className="block text-xs font-bold text-amber-200/90 mb-1 flex items-center justify-between">
+                          <span className="flex items-center gap-1.5">
+                            <Award className="w-3.5 h-3.5 text-[#D4AF37]" />
+                            <span>مصنف کی حیثیت (Author Role)</span>
+                          </span>
+                          <span className="text-[10px] text-slate-400">اختیاری</span>
+                        </label>
+                        <select
+                          value={coverConfig?.authorRole || authorRole || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (setAuthorRole) setAuthorRole(val);
+                            setCoverConfig((prev) => ({ ...prev, authorRole: val }));
+                          }}
+                          className="w-full px-3 py-2 text-xs font-urdu bg-slate-800 border border-slate-700 text-white rounded-lg focus:outline-none focus:border-[#D4AF37]"
+                        >
+                          <option value="">-- مصنف کی حیثیت (اختیاری) --</option>
+                          {AUTHOR_ROLE_OPTIONS.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                        {(coverConfig?.authorRole === 'دیگر' || authorRole === 'دیگر') && (
+                          <input
+                            type="text"
+                            value={coverConfig?.customAuthorRole || customAuthorRole || ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (setCustomAuthorRole) setCustomAuthorRole(val);
+                              setCoverConfig((prev) => ({ ...prev, customAuthorRole: val }));
+                            }}
+                            placeholder="اپنی حیثیت درج کریں (مثلاً: نگران، اشاعت و طباعت)"
+                            className="w-full mt-2 px-3 py-2 text-xs font-urdu bg-slate-800/90 border border-[#D4AF37]/50 text-white rounded-lg focus:outline-none focus:border-[#D4AF37]"
+                          />
+                        )}
+                      </div>
+
                     </div>
+                  </div>
+                )}
+
+                {/* TAB 1.5: TAQREEZAT SECTION */}
+                {activeSettingsTab === 'taqreez' && (
+                  <div className="space-y-3">
+                    <p className="text-[11px] text-slate-300 leading-relaxed font-urdu">
+                      کتاب کے ابتدائی صفحات میں بزرگوں یا اہل علم کی تقریظ شامل کریں۔ متن بغیر کسی خلاصے یا تبدیلی کے 100% محفوظ رہے گا۔
+                    </p>
+
+                    {taqreezat && taqreezat.length > 0 ? (
+                      <div className="space-y-3">
+                        {taqreezat.map((tq, idx) => (
+                          <div key={tq.id} className="p-3 bg-slate-900 border border-amber-500/30 rounded-xl space-y-2">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                              <span className="font-bold text-[#D4AF37] text-xs">تقریظ {idx + 1}</span>
+                              <button
+                                onClick={() => setTaqreezat && setTaqreezat((prev) => prev.filter((item) => item.id !== tq.id))}
+                                className="text-rose-400 hover:text-rose-300 text-[11px] flex items-center gap-1 cursor-pointer"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>حذف</span>
+                              </button>
+                            </div>
+
+                            <input
+                              type="text"
+                              value={tq.endorserName}
+                              onChange={(e) => {
+                                if (!setTaqreezat) return;
+                                const val = e.target.value;
+                                setTaqreezat((prev) => prev.map((item) => item.id === tq.id ? { ...item, endorserName: val } : item));
+                              }}
+                              placeholder="تقریظ کنندہ کا نام"
+                              className="w-full px-2.5 py-1.5 text-xs bg-slate-800 border border-slate-700 text-white rounded-lg focus:outline-none focus:border-[#D4AF37]"
+                            />
+
+                            <input
+                              type="text"
+                              value={tq.endorserTitle || ''}
+                              onChange={(e) => {
+                                if (!setTaqreezat) return;
+                                const val = e.target.value;
+                                setTaqreezat((prev) => prev.map((item) => item.id === tq.id ? { ...item, endorserTitle: val } : item));
+                              }}
+                              placeholder="عہدہ یا مختصر تعارف (اختیاری)"
+                              className="w-full px-2.5 py-1.5 text-xs bg-slate-800 border border-slate-700 text-white rounded-lg focus:outline-none focus:border-[#D4AF37]"
+                            />
+
+                            <textarea
+                              rows={3}
+                              value={tq.text}
+                              onChange={(e) => {
+                                if (!setTaqreezat) return;
+                                const val = e.target.value;
+                                setTaqreezat((prev) => prev.map((item) => item.id === tq.id ? { ...item, text: val } : item));
+                              }}
+                              placeholder="یہاں تقریظ کا اصل متن درج کریں..."
+                              className="w-full p-2 text-xs bg-slate-800 border border-slate-700 text-white rounded-lg focus:outline-none focus:border-[#D4AF37] resize-y"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-4 text-center border border-dashed border-slate-700 rounded-xl bg-slate-900/50">
+                        <p className="text-slate-400 text-xs mb-2">کوئی تقریظ شامل نہیں ہے</p>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!setTaqreezat) return;
+                        setTaqreezat((prev) => [
+                          ...prev,
+                          {
+                            id: Math.random().toString(36).substring(2, 9),
+                            endorserName: '',
+                            endorserTitle: '',
+                            text: '',
+                          },
+                        ]);
+                      }}
+                      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-[#D4AF37] hover:bg-[#c49f2e] text-[#0F172A] font-bold rounded-lg text-xs cursor-pointer shadow-xs transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ مزید تقریظ شامل کریں</span>
+                    </button>
                   </div>
                 )}
 
@@ -1437,6 +1683,11 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                   {pageOrder.map((pg, pIdx) => {
                     let pageLabel = '';
                     if (pg === 'cover') pageLabel = 'سرورق (Cover)';
+                    else if (pg.startsWith('taqreez_')) {
+                      const tIdx = parseInt(pg.replace('taqreez_', ''), 10);
+                      const tName = validTaqreezat[tIdx]?.endorserName;
+                      pageLabel = tName ? `تقریظ: ${tName}` : `تقریظ ${toUrduDigits(tIdx + 1)}`;
+                    }
                     else if (pg === 'title_page') pageLabel = 'پیش لفظ (Preface)';
                     else if (pg === 'toc') pageLabel = 'فہرست مضامین (TOC)';
                     else if (pg === 'conclusion') pageLabel = 'اختتامیہ (Conclusion)';
