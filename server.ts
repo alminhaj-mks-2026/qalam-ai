@@ -1,7 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
-import puppeteer from 'puppeteer';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -23,7 +22,27 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json({ limit: '20mb' }));
+// Normalize request URL for Vercel Serverless Function rewrites
+app.use((req, res, next) => {
+  const matchedPath =
+    (req.headers['x-matched-path'] as string) ||
+    (req.headers['x-forwarded-url'] as string);
+
+  if (matchedPath && req.url === '/api' && matchedPath !== '/api') {
+    req.url = matchedPath;
+  } else if (!req.url.startsWith('/api') && !req.url.startsWith('/fonts')) {
+    req.url = `/api${req.url}`;
+  }
+  next();
+});
+
+// Safe Body Parsing: handles pre-parsed Vercel serverless bodies without re-reading consumed stream
+app.use((req, res, next) => {
+  if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+    return next();
+  }
+  express.json({ limit: '20mb' })(req, res, next);
+});
 
 // Cached base64 fonts for zero-latency, offline font embedding in Puppeteer PDF
 let cachedNastaliqFontBase64 = '';
@@ -502,6 +521,7 @@ app.post('/api/generate-pdf', async (req, res) => {
       });
     } else {
       console.log('[PDF Generator] Launching in local environment using standard puppeteer...');
+      const puppeteer = (await import('puppeteer')).default as any;
       browser = await puppeteer.launch({ 
         headless: true,
         args: [
@@ -798,8 +818,20 @@ const activeJobWorkers = new Set<string>();
 // Set of cancelled job IDs to immediately halt running workers
 const cancelledJobIds = new Set<string>();
 
-// Disk persistence directory (.qalam_jobs in project root, or /tmp/qalam_jobs if read-only)
+// Disk persistence directory (/tmp/qalam_jobs on Vercel/Lambda, or .qalam_jobs in project root)
 function getJobsStorageDir(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    const tmpDir = path.resolve('/tmp', 'qalam_jobs');
+    try {
+      if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+      }
+    } catch (e) {
+      console.warn('Could not ensure /tmp/qalam_jobs:', e);
+    }
+    return tmpDir;
+  }
+
   try {
     const localDir = path.resolve(process.cwd(), '.qalam_jobs');
     if (!fs.existsSync(localDir)) {
@@ -833,19 +865,28 @@ function loadJobState(jobId: string): BookJobState | null {
   if (activeJobs.has(jobId)) {
     return activeJobs.get(jobId)!;
   }
-  try {
-    const dir = getJobsStorageDir();
-    const filePath = path.join(dir, `${jobId}.json`);
-    if (fs.existsSync(filePath)) {
-      const data = fs.readFileSync(filePath, 'utf-8');
-      const job = JSON.parse(data) as BookJobState;
-      if (job && job.jobId) {
-        activeJobs.set(job.jobId, job);
-        return job;
+  const searchDirs = [
+    getJobsStorageDir(),
+    path.resolve('/tmp', 'qalam_jobs'),
+    path.resolve(process.cwd(), '.qalam_jobs'),
+  ];
+  const checked = new Set<string>();
+  for (const dir of searchDirs) {
+    if (checked.has(dir)) continue;
+    checked.add(dir);
+    try {
+      const filePath = path.join(dir, `${jobId}.json`);
+      if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath, 'utf-8');
+        const job = JSON.parse(data) as BookJobState;
+        if (job && job.jobId) {
+          activeJobs.set(job.jobId, job);
+          return job;
+        }
       }
+    } catch (err) {
+      // Continue checking other directories
     }
-  } catch (err) {
-    console.error(`[Job Persistence] Error reading job ${jobId} from disk:`, err);
   }
   return null;
 }
@@ -860,6 +901,9 @@ if (!(global as any)._activeJobsCleanupInterval) {
       }
     }
   }, 600000);
+  if ((global as any)._activeJobsCleanupInterval?.unref) {
+    (global as any)._activeJobsCleanupInterval.unref();
+  }
 }
 
 /**
@@ -1312,7 +1356,7 @@ Target JSON format:
 // POST /api/generate-book - Start or Resume Background Job (Returns unique Job ID immediately)
 app.post('/api/generate-book', async (req, res) => {
   try {
-    const { content, title, authorName, genre, language, jobId } = req.body;
+    const { content, title, authorName, genre, language, jobId } = req.body || {};
 
     if (!content || typeof content !== 'string' || !content.trim()) {
       return res.status(400).json({
@@ -1741,6 +1785,10 @@ Always provide authentic, well-structured, clear, and dignified responses.`;
 
 // Vite Integration for dev server / Express static for production
 async function startServer() {
+  if (process.env.VERCEL) {
+    return;
+  }
+
   // Serve fonts
   app.use('/fonts', express.static('node_modules/@fontsource'));
 
@@ -1755,13 +1803,27 @@ async function startServer() {
     app.use(express.static('dist'));
   }
 
-  if (!process.env.VERCEL) {
-    app.listen(PORT, () => {
-      console.log(`Qalam AI Server running at http://localhost:${PORT}`);
-    });
-  }
+  app.listen(PORT, () => {
+    console.log(`Qalam AI Server running at http://localhost:${PORT}`);
+  });
 }
 
-startServer();
+// Global Express error handler to prevent uncaught exceptions crashing serverless invocations
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error('[Express Global Error]:', err);
+  if (!res.headersSent) {
+    res.status(err?.status || 500).json({
+      success: false,
+      error: err?.message || 'سرور پر غیر متوقع خرابی پیش آئی۔',
+      details: err?.stack || String(err),
+    });
+  }
+});
+
+if (!process.env.VERCEL) {
+  startServer().catch((err) => {
+    console.error('Failed to start server:', err);
+  });
+}
 
 export default app;
