@@ -482,10 +482,18 @@ function repairTruncatedJson(jsonStr: string): string {
 }
 
 // POST /api/generate-pdf
-app.post('/api/generate-pdf', async (req, res) => {
+app.post(['/api/generate-pdf', '/generate-pdf'], async (req, res) => {
   let browser;
   try {
-    const { htmlContent, pageSize, orientation, headerTemplate, footerTemplate } = req.body;
+    let body = req.body;
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        body = {};
+      }
+    }
+    const { htmlContent, pageSize, orientation, headerTemplate, footerTemplate } = body || {};
     
     if (!htmlContent) {
       return res.status(400).json({ error: 'HTML content required' });
@@ -506,6 +514,25 @@ app.post('/api/generate-pdf', async (req, res) => {
       console.log('[PDF Generator] Launching in Vercel Serverless environment using @sparticuz/chromium...');
       const chromium = (await import('@sparticuz/chromium')).default as any;
       const puppeteerCore = (await import('puppeteer-core')).default as any;
+
+      // Locate chromium bin directory if relocated in Vercel bundle
+      const candidateBinDirs = [
+        path.resolve(process.cwd(), 'node_modules/@sparticuz/chromium/bin'),
+        path.resolve(__dirname, '../node_modules/@sparticuz/chromium/bin'),
+        path.resolve(__dirname, 'node_modules/@sparticuz/chromium/bin'),
+        '/var/task/node_modules/@sparticuz/chromium/bin',
+      ];
+      let binDir: string | undefined;
+      for (const candidate of candidateBinDirs) {
+        if (fs.existsSync(candidate)) {
+          binDir = candidate;
+          break;
+        }
+      }
+
+      const execPath = binDir
+        ? await chromium.executablePath(binDir)
+        : await chromium.executablePath();
       
       browser = await puppeteerCore.launch({
         args: [
@@ -516,8 +543,8 @@ app.post('/api/generate-pdf', async (req, res) => {
           '--disable-gpu'
         ],
         defaultViewport: chromium.defaultViewport,
-        executablePath: await chromium.executablePath(),
-        headless: chromium.headless,
+        executablePath: execPath,
+        headless: true,
       });
     } else {
       console.log('[PDF Generator] Launching in local environment using standard puppeteer...');
