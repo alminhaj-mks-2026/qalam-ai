@@ -22,26 +22,69 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Normalize request URL for Vercel Serverless Function rewrites
+// Normalize request URL for Vercel Serverless Function rewrites and route variations
 app.use((req, res, next) => {
-  const matchedPath =
-    (req.headers['x-matched-path'] as string) ||
-    (req.headers['x-forwarded-url'] as string);
+  const forwardedUrl = (req.headers['x-forwarded-url'] as string) || (req.headers['x-real-url'] as string);
+  const matchedPath = req.headers['x-matched-path'] as string;
+  const queryPath = (req.query?.path as string) || (req.query?.['1'] as string) || (req.query?.['0'] as string);
 
-  if (matchedPath && req.url === '/api' && matchedPath !== '/api') {
+  // If Vercel rewrote /api/generate-book to /api?1=generate-book or /api?path=generate-book
+  if (queryPath && (req.url === '/api' || req.url.startsWith('/api?'))) {
+    const cleanSub = queryPath.startsWith('/') ? queryPath : `/${queryPath}`;
+    req.url = `/api${cleanSub}`;
+  } else if (forwardedUrl && (req.url === '/api' || req.url === '/')) {
+    req.url = forwardedUrl;
+  } else if (matchedPath && (req.url === '/api' || req.url === '/') && matchedPath !== '/api') {
     req.url = matchedPath;
-  } else if (!req.url.startsWith('/api') && !req.url.startsWith('/fonts')) {
-    req.url = `/api${req.url}`;
   }
+
+  console.log(`[DIAGNOSTIC] [APP DISPATCH] ${req.method} final req.url: ${req.url} (original: ${req.originalUrl || 'N/A'})`);
   next();
 });
 
-// Safe Body Parsing: handles pre-parsed Vercel serverless bodies without re-reading consumed stream
+// Safe Body Parsing: handles pre-parsed Vercel serverless bodies, JSON strings, Buffers without crashing on consumed streams
 app.use((req, res, next) => {
-  if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+  // If req.body is already a parsed JS object
+  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body) && Object.keys(req.body).length > 0) {
     return next();
   }
-  express.json({ limit: '20mb' })(req, res, next);
+
+  // If req.body is a JSON string
+  if (typeof req.body === 'string' && req.body.trim().startsWith('{')) {
+    try {
+      req.body = JSON.parse(req.body);
+      return next();
+    } catch (e) {
+      console.warn('[BodyParser] Could not parse string req.body:', e);
+    }
+  }
+
+  // If req.body is a Buffer
+  if (Buffer.isBuffer(req.body)) {
+    try {
+      req.body = JSON.parse(req.body.toString('utf-8'));
+      return next();
+    } catch (e) {
+      console.warn('[BodyParser] Could not parse Buffer req.body:', e);
+    }
+  }
+
+  // If the stream has already been read/ended (common in Vercel), avoid calling express.json which throws
+  if (req.readableEnded || req.complete) {
+    if (!req.body) {
+      req.body = {};
+    }
+    return next();
+  }
+
+  // Otherwise, use express.json safely
+  express.json({ limit: '20mb' })(req, res, (err) => {
+    if (err) {
+      console.warn('[BodyParser] express.json stream parse note:', err?.message || err);
+      req.body = req.body || {};
+    }
+    next();
+  });
 });
 
 // Cached base64 fonts for zero-latency, offline font embedding in Puppeteer PDF
@@ -518,9 +561,9 @@ app.post(['/api/generate-pdf', '/generate-pdf'], async (req, res) => {
       // Locate chromium bin directory if relocated in Vercel bundle
       const candidateBinDirs = [
         path.resolve(process.cwd(), 'node_modules/@sparticuz/chromium/bin'),
-        path.resolve(__dirname, '../node_modules/@sparticuz/chromium/bin'),
-        path.resolve(__dirname, 'node_modules/@sparticuz/chromium/bin'),
+        path.resolve(process.cwd(), '../node_modules/@sparticuz/chromium/bin'),
         '/var/task/node_modules/@sparticuz/chromium/bin',
+        '/tmp/node_modules/@sparticuz/chromium/bin',
       ];
       let binDir: string | undefined;
       for (const candidate of candidateBinDirs) {
@@ -530,9 +573,15 @@ app.post(['/api/generate-pdf', '/generate-pdf'], async (req, res) => {
         }
       }
 
-      const execPath = binDir
-        ? await chromium.executablePath(binDir)
-        : await chromium.executablePath();
+      let execPath: string;
+      try {
+        execPath = binDir
+          ? await chromium.executablePath(binDir)
+          : await chromium.executablePath();
+      } catch (pathErr) {
+        console.warn('[PDF Generator] chromium.executablePath resolution fallback:', pathErr);
+        execPath = await chromium.executablePath();
+      }
       
       browser = await puppeteerCore.launch({
         args: [
@@ -919,7 +968,7 @@ function loadJobState(jobId: string): BookJobState | null {
 }
 
 // Periodic TTL cleanup: jobs in memory older than 2 hours are pruned from RAM (remain on disk)
-if (!(global as any)._activeJobsCleanupInterval) {
+if (!process.env.VERCEL && !(global as any)._activeJobsCleanupInterval) {
   (global as any)._activeJobsCleanupInterval = setInterval(() => {
     const now = Date.now();
     for (const [jobId, job] of activeJobs.entries()) {
@@ -1381,7 +1430,7 @@ Target JSON format:
 // ==========================================
 
 // POST /api/generate-book - Start or Resume Background Job (Returns unique Job ID immediately)
-app.post('/api/generate-book', async (req, res) => {
+app.post(['/api/generate-book', '/generate-book'], async (req, res) => {
   try {
     const { content, title, authorName, genre, language, jobId } = req.body || {};
 
@@ -1563,13 +1612,13 @@ function handleCancelJobRequest(req: express.Request, res: express.Response) {
 }
 
 // POST /api/generate-book/cancel/:jobId
-app.post('/api/generate-book/cancel/:jobId', handleCancelJobRequest);
+app.post(['/api/generate-book/cancel/:jobId', '/generate-book/cancel/:jobId'], handleCancelJobRequest);
 
 // POST /api/generate-book/cancel
-app.post('/api/generate-book/cancel', handleCancelJobRequest);
+app.post(['/api/generate-book/cancel', '/generate-book/cancel'], handleCancelJobRequest);
 
 // GET /api/generate-book/status/:jobId - Poll Real Server-Side Job Progress (Strictly Read-Only)
-app.get('/api/generate-book/status/:jobId', (req, res) => {
+app.get(['/api/generate-book/status/:jobId', '/generate-book/status/:jobId'], (req, res) => {
   const { jobId } = req.params;
   const job = loadJobState(jobId);
 
@@ -1627,7 +1676,7 @@ app.get('/api/generate-book/status/:jobId', (req, res) => {
 });
 
 // GET /api/generate-book/result/:jobId - Fetch Assembled Book
-app.get('/api/generate-book/result/:jobId', (req, res) => {
+app.get(['/api/generate-book/result/:jobId', '/generate-book/result/:jobId'], (req, res) => {
   const { jobId } = req.params;
   const job = loadJobState(jobId);
 
@@ -1666,7 +1715,7 @@ app.get('/api/generate-book/result/:jobId', (req, res) => {
 });
 
 // POST /api/suggest-title - Controlled Gemini Title Suggestion Endpoint with Concurrency=1
-app.post('/api/suggest-title', async (req, res) => {
+app.post(['/api/suggest-title', '/suggest-title'], async (req, res) => {
   let modelUsed: string = DEFAULT_GEMINI_MODEL;
   try {
     const { content, genre, language } = req.body;
@@ -1746,7 +1795,7 @@ ${content.slice(0, 4000)}
 });
 
 // POST /api/chat - Qalam AI Chat & Text Assistant endpoint using primary model gemini-3.8-flash
-app.post('/api/chat', async (req, res) => {
+app.post(['/api/chat', '/chat'], async (req, res) => {
   let modelUsed: string = DEFAULT_GEMINI_MODEL;
   try {
     const { message, history } = req.body;
