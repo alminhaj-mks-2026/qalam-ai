@@ -210,7 +210,7 @@ export async function createBookPdfBlob(
     }
 
     @page :first {
-      margin: 0;
+      margin: 0 !important;
     }
 
     /* 1. Cover Page */
@@ -431,10 +431,10 @@ export async function createBookPdfBlob(
       font-weight: bold;
       color: #0f172a;
       border-bottom: 2px solid ${themeColor};
-      margin-bottom: 12px;
-      padding-bottom: 6px;
+      margin-bottom: 14px;
+      padding-bottom: 8px;
       text-align: center;
-      line-height: 1.45;
+      line-height: 1.5;
       font-family: 'Noto Nastaliq Urdu', serif;
       break-after: avoid;
       page-break-after: avoid;
@@ -444,13 +444,13 @@ export async function createBookPdfBlob(
       font-size: 16px;
       font-weight: bold;
       color: #1e293b;
-      margin-top: 14px;
-      margin-bottom: 6px;
+      margin-top: 16px;
+      margin-bottom: 10px;
       background: #f8fafc;
       padding: 4px 10px;
       border-right: 4px solid ${themeColor};
       border-radius: 4px;
-      line-height: 1.4;
+      line-height: 1.6;
       font-family: 'Noto Nastaliq Urdu', serif;
       break-after: avoid;
       page-break-after: avoid;
@@ -746,7 +746,7 @@ export async function createBookPdfBlob(
       <div style="position: absolute; top: 2mm; left: 14mm; right: 14mm; display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: #64748b; border-top: 0.8px solid #e2e8f0; padding-top: 1.5mm;">
         <span>${showWatermark ? 'Qalam AI' : ''}</span>
         <span style="font-weight: bold; color: #0f172a; background: #f1f5f9; padding: 1px 8px; border-radius: 4px; border: 1px solid #cbd5e1;">
-          صفحہ <span class="pageNumber"></span> / <span class="totalPages"></span>
+          صفحہ <span class="pageNumber"></span>
         </span>
         <span>${cleanTitle}</span>
       </div>

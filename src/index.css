@@ -157,26 +157,23 @@
 }
 
 /* Hide native caret only inside contenteditable fields */
-[contenteditable] {
-  caret-color: transparent !important;
+/* High-Visibility RTL Caret for Urdu & Arabic Editing */
+[contenteditable],
+input[type="text"],
+input:not([type]),
+textarea {
+  caret-color: #047857 !important; /* Deep prominent emerald caret - crystal clear against paper */
+  direction: rtl;
+  unicode-bidi: plaintext;
+  scroll-margin-top: 80px;
+  scroll-margin-bottom: 90px;
 }
 
-/* Beautiful custom thin blinking caret styling */
-.custom-caret {
-  position: fixed;
-  z-index: 99999;
-  width: 2px;
-  background-color: #D4AF37; /* gold styling */
-  pointer-events: none;
-  animation: qalam-caret-blink 1.0s steps(2, start) infinite;
-  box-shadow: 0 0 1px rgba(0, 0, 0, 0.35);
-  border-radius: 1px;
-}
-
-@keyframes qalam-caret-blink {
-  to {
-    visibility: hidden;
-  }
+/* Caret visibility on dark cover background */
+[style*="background-color: #0F172A"] input,
+[style*="background-color: rgb(15, 23, 42)"] input,
+.cover-page input {
+  caret-color: #f59e0b !important; /* Warm vibrant amber on dark cover */
 }
 
 @media print {

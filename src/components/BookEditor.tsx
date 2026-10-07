@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { TranslationDictionary } from '../i18n/translations';
 import { ChapterOutline, StyleOverrides, CoverPageConfig, CoverLayout, PageImageConfig, Taqreez, resolveAuthorRoleLabel } from '../types';
 import {
@@ -73,6 +73,313 @@ export function getStyleCss(styles?: StyleOverrides): React.CSSProperties {
   }
   return s;
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// RTL CARET & SELECTION PRESERVATION ENGINE (SURGICAL FIX)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export interface CaretPosition {
+  start: number;
+  end: number;
+  isCollapsed: boolean;
+}
+
+export function getCaretCharacterOffset(root: HTMLElement): CaretPosition | null {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) {
+    return null;
+  }
+
+  const start = calculateOffsetFromRoot(root, range.startContainer, range.startOffset);
+  const end = range.collapsed
+    ? start
+    : calculateOffsetFromRoot(root, range.endContainer, range.endOffset);
+
+  return { start, end, isCollapsed: range.collapsed };
+}
+
+function countSubtreeChars(node: Node): number {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent?.length || 0;
+  }
+  if (node.nodeName === 'BR') {
+    return 1;
+  }
+  let count = 0;
+  for (let i = 0; i < node.childNodes.length; i++) {
+    count += countSubtreeChars(node.childNodes[i]);
+  }
+  return count;
+}
+
+function calculateOffsetFromRoot(root: HTMLElement, targetContainer: Node, targetOffset: number): number {
+  let charCount = 0;
+  let finished = false;
+
+  function traverse(node: Node) {
+    if (finished) return;
+
+    if (node === targetContainer) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        charCount += targetOffset;
+      } else {
+        for (let i = 0; i < targetOffset && i < node.childNodes.length; i++) {
+          charCount += countSubtreeChars(node.childNodes[i]);
+        }
+      }
+      finished = true;
+      return;
+    }
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      charCount += node.textContent?.length || 0;
+    } else if (node.nodeName === 'BR') {
+      charCount += 1;
+    } else {
+      for (let i = 0; i < node.childNodes.length; i++) {
+        traverse(node.childNodes[i]);
+        if (finished) return;
+      }
+    }
+  }
+
+  traverse(root);
+  return charCount;
+}
+
+function findNodeAtCharOffset(root: HTMLElement, targetOffset: number): { node: Node; offset: number } {
+  let charCount = 0;
+  let result: { node: Node; offset: number } | null = null;
+
+  function traverse(node: Node): boolean {
+    if (result) return true;
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      const len = node.textContent?.length || 0;
+      if (charCount + len >= targetOffset) {
+        result = {
+          node,
+          offset: Math.max(0, targetOffset - charCount),
+        };
+        return true;
+      }
+      charCount += len;
+    } else if (node.nodeName === 'BR') {
+      if (charCount + 1 >= targetOffset) {
+        if (node.parentNode) {
+          const idx = Array.prototype.indexOf.call(node.parentNode.childNodes, node);
+          result = {
+            node: node.parentNode,
+            offset: targetOffset === charCount ? idx : idx + 1,
+          };
+          return true;
+        }
+      }
+      charCount += 1;
+    } else {
+      for (let i = 0; i < node.childNodes.length; i++) {
+        if (traverse(node.childNodes[i])) return true;
+      }
+    }
+    return false;
+  }
+
+  traverse(root);
+
+  if (!result) {
+    let lastTextNode: Node | null = null;
+    function findLastText(node: Node) {
+      if (node.nodeType === Node.TEXT_NODE) lastTextNode = node;
+      for (let i = 0; i < node.childNodes.length; i++) {
+        findLastText(node.childNodes[i]);
+      }
+    }
+    findLastText(root);
+
+    if (lastTextNode) {
+      return { node: lastTextNode, offset: (lastTextNode as Node).textContent?.length || 0 };
+    }
+    return { node: root, offset: root.childNodes.length };
+  }
+
+  return result;
+}
+
+export function restoreCaretPosition(root: HTMLElement, caret: CaretPosition): boolean {
+  const selection = window.getSelection();
+  if (!selection) return false;
+
+  const startPoint = findNodeAtCharOffset(root, caret.start);
+  const endPoint = caret.isCollapsed ? startPoint : findNodeAtCharOffset(root, caret.end);
+
+  try {
+    const range = document.createRange();
+    range.setStart(startPoint.node, startPoint.offset);
+    range.setEnd(endPoint.node, endPoint.offset);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  } catch (err) {
+    console.warn('[Qalam AI] Caret restore warning:', err);
+    return false;
+  }
+}
+
+interface RtlEditableFieldProps {
+  html: string;
+  onChange: (newHtml: string) => void;
+  onBlur?: (newHtml: string) => void;
+  onFocus?: () => void;
+  style?: React.CSSProperties;
+  className?: string;
+  placeholder?: string;
+  'data-placeholder'?: string;
+  dir?: 'rtl' | 'ltr';
+}
+
+export const RtlEditableField: React.FC<RtlEditableFieldProps> = ({
+  html,
+  onChange,
+  onBlur,
+  onFocus,
+  style,
+  className,
+  placeholder,
+  'data-placeholder': dataPlaceholder,
+  dir = 'rtl',
+}) => {
+  const elRef = useRef<HTMLDivElement>(null);
+  const lastHtmlRef = useRef<string>(html || '');
+  const savedCaretRef = useRef<CaretPosition | null>(null);
+  const isComposingRef = useRef<boolean>(false);
+  const isFocusedRef = useRef<boolean>(false);
+
+  // Sync prop changes from outside (e.g. Undo/Redo or external formatting)
+  useLayoutEffect(() => {
+    if (!elRef.current) return;
+    const currentDomHtml = elRef.current.innerHTML;
+
+    if (html !== lastHtmlRef.current || html !== currentDomHtml) {
+      const isFocused = isFocusedRef.current && document.activeElement === elRef.current;
+
+      // Only update if DOM content genuinely diverges from incoming prop
+      if (currentDomHtml !== html) {
+        if (isFocused) {
+          const caret = getCaretCharacterOffset(elRef.current);
+          if (caret) savedCaretRef.current = caret;
+        }
+
+        elRef.current.innerHTML = html || '';
+        lastHtmlRef.current = html || '';
+
+        if (isFocused && savedCaretRef.current) {
+          restoreCaretPosition(elRef.current, savedCaretRef.current);
+        }
+      } else {
+        lastHtmlRef.current = html || '';
+      }
+    }
+  }, [html]);
+
+  // Track selection change while this element is active to keep caret position fresh
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      if (!elRef.current || document.activeElement !== elRef.current) return;
+      const caret = getCaretCharacterOffset(elRef.current);
+      if (caret) {
+        savedCaretRef.current = caret;
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, []);
+
+  const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
+    if (!elRef.current) return;
+    // Track caret immediately after native DOM mutation
+    const caret = getCaretCharacterOffset(elRef.current);
+    if (caret) {
+      savedCaretRef.current = caret;
+    }
+
+    const newHtml = elRef.current.innerHTML;
+    lastHtmlRef.current = newHtml;
+
+    if (!isComposingRef.current) {
+      onChange(newHtml);
+    }
+  };
+
+  const handleFocus = () => {
+    isFocusedRef.current = true;
+    if (elRef.current) {
+      const caret = getCaretCharacterOffset(elRef.current);
+      if (caret) savedCaretRef.current = caret;
+    }
+    onFocus?.();
+  };
+
+  const handleBlur = () => {
+    isFocusedRef.current = false;
+    if (elRef.current) {
+      const currentHtml = elRef.current.innerHTML;
+      lastHtmlRef.current = currentHtml;
+      onBlur?.(currentHtml);
+    }
+  };
+
+  const handlePointerUp = () => {
+    if (!elRef.current) return;
+    setTimeout(() => {
+      if (elRef.current && document.activeElement === elRef.current) {
+        const caret = getCaretCharacterOffset(elRef.current);
+        if (caret) savedCaretRef.current = caret;
+      }
+    }, 10);
+  };
+
+  return (
+    <div
+      ref={elRef}
+      contentEditable
+      suppressContentEditableWarning
+      spellCheck={false}
+      dir={dir}
+      onInput={handleInput}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
+      onPointerUp={handlePointerUp}
+      onTouchEnd={handlePointerUp}
+      onKeyUp={handlePointerUp}
+      onCompositionStart={() => {
+        isComposingRef.current = true;
+      }}
+      onCompositionEnd={() => {
+        isComposingRef.current = false;
+        if (elRef.current) {
+          const newHtml = elRef.current.innerHTML;
+          lastHtmlRef.current = newHtml;
+          onChange(newHtml);
+        }
+      }}
+      style={{
+        direction: 'rtl',
+        textAlign: (style?.textAlign as any) || 'right',
+        unicodeBidi: 'plaintext',
+        outline: 'none',
+        ...style,
+      }}
+      className={className}
+      data-placeholder={dataPlaceholder || placeholder}
+    />
+  );
+};
 
 interface BookEditorProps {
   t: TranslationDictionary;
@@ -159,96 +466,68 @@ export const BookEditor: React.FC<BookEditorProps> = ({
   const [editorPage, setEditorPage] = useState<'cover' | 'title_page' | 'toc' | string>('cover');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Custom Thin Caret Positioning State
-  const [caretPos, setCaretPos] = useState<{ top: number; left: number; height: number; visible: boolean }>({
-    top: 0,
-    left: 0,
-    height: 0,
-    visible: false,
-  });
-
+  // Mobile virtual keyboard & viewport visibility handler (Targeting exact Caret position)
   useEffect(() => {
-    const updateCaret = () => {
-      const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) {
-        setCaretPos((prev) => (prev.visible ? { ...prev, visible: false } : prev));
-        return;
-      }
+    let scrollTimeout: any = null;
 
-      const activeEl = document.activeElement;
-      if (!activeEl || !activeEl.hasAttribute('contenteditable')) {
-        setCaretPos((prev) => (prev.visible ? { ...prev, visible: false } : prev));
-        return;
-      }
+    const handleViewportAdjust = () => {
+      if (scrollTimeout) clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(() => {
+        const activeEl = document.activeElement as HTMLElement | null;
+        if (!activeEl) return;
+        const isEditable = activeEl.hasAttribute('contenteditable') || activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA';
+        if (!isEditable) return;
 
-      const range = selection.getRangeAt(0);
-      const style = window.getComputedStyle(activeEl);
-      const fontSize = parseFloat(style.fontSize) || 16;
-      const dir = style.direction || 'rtl';
-
-      let rect: { top: number; left: number; height: number } | null = null;
-      const rects = range.getClientRects();
-
-      if (rects && rects.length > 0 && rects[0].height > 0) {
-        rect = {
-          top: rects[0].top,
-          left: rects[0].left,
-          height: rects[0].height,
-        };
-      } else {
-        const rangeBounds = range.getBoundingClientRect();
-        if (rangeBounds && rangeBounds.height > 0) {
-          rect = {
-            top: rangeBounds.top,
-            left: rangeBounds.left,
-            height: rangeBounds.height,
-          };
-        } else {
-          const elRect = activeEl.getBoundingClientRect();
-          const paddingLeft = parseFloat(style.paddingLeft) || 0;
-          const paddingRight = parseFloat(style.paddingRight) || 0;
-          const paddingTop = parseFloat(style.paddingTop) || 0;
-
-          rect = {
-            top: elRect.top + paddingTop,
-            left: dir === 'rtl' ? elRect.right - paddingRight - 2 : elRect.left + paddingLeft,
-            height: fontSize,
-          };
+        // Find the precise Caret / Selection rect if available
+        const selection = window.getSelection();
+        let targetRect: DOMRect | null = null;
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          const rects = range.getClientRects();
+          if (rects.length > 0) {
+            targetRect = rects[0];
+          } else {
+            targetRect = range.getBoundingClientRect();
+          }
         }
-      }
 
-      if (rect) {
-        setCaretPos({
-          top: rect.top,
-          left: rect.left,
-          height: Math.min(rect.height, fontSize * 1.3) || fontSize,
-          visible: true,
-        });
-      }
+        // Fallback to activeEl rect if range rect is zero
+        if (!targetRect || (targetRect.width === 0 && targetRect.height === 0)) {
+          targetRect = activeEl.getBoundingClientRect();
+        }
+
+        const vpHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        const topMargin = 75; // Clearance for compact sticky toolbar
+        const bottomMargin = 70; // Clearance for mobile virtual keyboard
+
+        // Only scroll if caret is truly outside visible safe area
+        if (targetRect.top < topMargin) {
+          window.scrollBy({
+            top: targetRect.top - topMargin - 15,
+            behavior: 'smooth',
+          });
+        } else if (targetRect.bottom > vpHeight - bottomMargin) {
+          window.scrollBy({
+            top: targetRect.bottom - (vpHeight - bottomMargin) + 20,
+            behavior: 'smooth',
+          });
+        }
+      }, 180);
     };
 
-    document.addEventListener('selectionchange', updateCaret);
-    window.addEventListener('scroll', updateCaret, { capture: true, passive: true });
-    window.addEventListener('resize', updateCaret, { passive: true });
-    document.addEventListener('keyup', updateCaret);
-    document.addEventListener('keydown', updateCaret);
-    document.addEventListener('mousedown', updateCaret);
-    document.addEventListener('mouseup', updateCaret);
-    document.addEventListener('focusin', updateCaret);
-    document.addEventListener('focusout', updateCaret);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleViewportAdjust);
+    }
+    document.addEventListener('focusin', handleViewportAdjust);
 
     return () => {
-      document.removeEventListener('selectionchange', updateCaret);
-      window.removeEventListener('scroll', updateCaret, { capture: true });
-      window.removeEventListener('resize', updateCaret);
-      document.removeEventListener('keyup', updateCaret);
-      document.removeEventListener('keydown', updateCaret);
-      document.removeEventListener('mousedown', updateCaret);
-      document.removeEventListener('mouseup', updateCaret);
-      document.removeEventListener('focusin', updateCaret);
-      document.removeEventListener('focusout', updateCaret);
+      if (scrollTimeout) clearTimeout(scrollTimeout);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleViewportAdjust);
+      }
+      document.removeEventListener('focusin', handleViewportAdjust);
     };
-  }, [editorPage]);
+  }, []);
 
   const [isResizing, setIsResizing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -922,16 +1201,16 @@ export const BookEditor: React.FC<BookEditorProps> = ({
   const chapterHeadingFontSize = Math.max(20, Math.round(effectiveFontSize * 1.4));
   const sectionHeadingFontSize = Math.max(16, Math.round(effectiveFontSize * 1.25));
 
-  // A4 geometry sizing classes identical to BookPreview
+  // True A4 geometry sizing classes matching real 210mm x 297mm PDF proportions
   const getContainerSizeClasses = () => {
     if (orientation === 'landscape') {
-      if (pageSize === 'A5') return 'w-full max-w-2xl aspect-[1.414/1] h-auto';
-      if (pageSize === 'B5') return 'w-full max-w-3xl aspect-[1.414/1] h-auto';
-      return 'w-full max-w-4xl aspect-[1.414/1] h-auto'; // A4 or Letter
+      if (pageSize === 'A5') return 'w-full max-w-[700px] aspect-[297/210] min-h-[495px]';
+      if (pageSize === 'B5') return 'w-full max-w-[850px] aspect-[297/210] min-h-[600px]';
+      return 'w-full max-w-[1000px] aspect-[297/210] min-h-[700px]'; // A4
     } else {
-      if (pageSize === 'A5') return 'w-full max-w-md aspect-[1/1.414] h-auto';
-      if (pageSize === 'B5') return 'w-full max-w-lg aspect-[1/1.414] h-auto';
-      return 'w-full max-w-xl aspect-[1/1.414] h-auto'; // A4 or Letter
+      if (pageSize === 'A5') return 'w-full max-w-[500px] aspect-[210/297] min-h-[707px]';
+      if (pageSize === 'B5') return 'w-full max-w-[600px] aspect-[210/297] min-h-[848px]';
+      return 'w-full max-w-[794px] aspect-[210/297] min-h-[850px] sm:min-h-[1123px]'; // True A4 (210mm x 297mm)
     }
   };
 
@@ -1186,17 +1465,15 @@ export const BookEditor: React.FC<BookEditorProps> = ({
         {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             1. FIXED & COMPACT STICKY QALAM FORMATTING TOOLBAR
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-        <div className="sticky top-0 z-40 bg-[#0F172A] text-slate-100 border border-[#D4AF37]/50 rounded-2xl shadow-xl p-3 font-urdu flex flex-col gap-2.5 animate-fade-in w-full" dir="rtl">
-          
-          {/* Row 1: Undo | Redo | Font Family | Font Size */}
-          <div className="flex flex-wrap items-center gap-2 w-full justify-start text-xs">
+        <div className="sticky top-0 z-40 bg-[#0F172A] text-slate-100 border border-[#D4AF37]/50 rounded-xl shadow-xl px-2 sm:px-3 py-1 font-urdu animate-fade-in w-full" dir="rtl">
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none py-0.5 w-full justify-start text-xs">
             {/* Real Undo & Redo Controls */}
-            <div className="flex items-center gap-0.5 bg-slate-800 p-1 rounded-xl border border-slate-700 shrink-0">
+            <div className="flex items-center gap-0.5 bg-slate-800/90 p-0.5 rounded-lg border border-slate-700/80 shrink-0">
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={handleUndo}
                 disabled={history.length === 0}
-                className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
+                className={`p-1.5 rounded-md cursor-pointer transition-colors ${
                   history.length > 0 ? 'text-slate-300 hover:text-white hover:bg-slate-700' : 'text-slate-600 cursor-not-allowed'
                 }`}
                 title="Undo (Ctrl+Z)"
@@ -1207,7 +1484,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={handleRedo}
                 disabled={redoStack.length === 0}
-                className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
+                className={`p-1.5 rounded-md cursor-pointer transition-colors ${
                   redoStack.length > 0 ? 'text-slate-300 hover:text-white hover:bg-slate-700' : 'text-slate-600 cursor-not-allowed'
                 }`}
                 title="Redo (Ctrl+Y)"
@@ -1217,43 +1494,43 @@ export const BookEditor: React.FC<BookEditorProps> = ({
             </div>
 
             {/* Font Selector */}
-            <div className="flex items-center gap-0.5 bg-slate-800 p-1 rounded-xl border border-slate-700 shrink-0">
+            <div className="flex items-center gap-0.5 bg-slate-800/90 p-0.5 rounded-lg border border-slate-700/80 shrink-0">
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => applyFormatting('fontFamily', "'Noto Nastaliq Urdu', 'Noto Naskh Arabic', 'Amiri', serif")}
-                className="px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
+                className="px-2 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
               >
                 اردو
               </button>
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => applyFormatting('fontFamily', "'Amiri', 'Noto Naskh Arabic', serif")}
-                className="px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
+                className="px-2 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
               >
                 عربی
               </button>
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => applyFormatting('fontFamily', "'Plus Jakarta Sans', system-ui, sans-serif")}
-                className="px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
+                className="px-2 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
               >
                 Eng
               </button>
             </div>
 
             {/* Font Size Adjuster */}
-            <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-slate-700 shrink-0">
+            <div className="flex items-center gap-0.5 bg-slate-800/90 p-0.5 rounded-lg border border-slate-700/80 shrink-0">
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   const s = currentStyles.fontSize || 16;
                   applyFormatting('fontSize', s - 1);
                 }}
-                className="w-6 h-6 flex items-center justify-center bg-slate-900 border border-slate-700 text-slate-200 rounded-lg hover:text-white cursor-pointer font-bold text-sm"
+                className="w-5 h-5 flex items-center justify-center bg-slate-900 border border-slate-700 text-slate-200 rounded hover:text-white cursor-pointer font-bold text-xs"
               >
                 -
               </button>
-              <span className="font-mono text-xs text-[#D4AF37] font-bold min-w-[20px] text-center px-1">
+              <span className="font-mono text-xs text-[#D4AF37] font-bold min-w-[18px] text-center px-0.5">
                 {currentStyles.fontSize || 16}
               </span>
               <button
@@ -1262,21 +1539,18 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                   const s = currentStyles.fontSize || 16;
                   applyFormatting('fontSize', s + 1);
                 }}
-                className="w-6 h-6 flex items-center justify-center bg-slate-900 border border-slate-700 text-slate-200 rounded-lg hover:text-white cursor-pointer font-bold text-sm"
+                className="w-5 h-5 flex items-center justify-center bg-slate-900 border border-slate-700 text-slate-200 rounded hover:text-white cursor-pointer font-bold text-xs"
               >
                 +
               </button>
             </div>
-          </div>
 
-          {/* Row 2: Bold | Italic | Underline | Alignment controls | Copy & Image */}
-          <div className="flex flex-wrap items-center gap-2 w-full justify-start text-xs">
             {/* Bold, Italic, Underline */}
-            <div className="flex items-center gap-0.5 bg-slate-800 p-1 rounded-xl border border-slate-700 shrink-0">
+            <div className="flex items-center gap-0.5 bg-slate-800/90 p-0.5 rounded-lg border border-slate-700/80 shrink-0">
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => applyFormatting('fontWeight', 'bold')}
-                className="p-1.5 rounded-lg cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
+                className="p-1.5 rounded-md cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
                 title="Bold"
               >
                 <Bold className="w-3.5 h-3.5" />
@@ -1284,7 +1558,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => applyFormatting('fontStyle', 'italic')}
-                className="p-1.5 rounded-lg cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
+                className="p-1.5 rounded-md cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
                 title="Italic"
               >
                 <Italic className="w-3.5 h-3.5" />
@@ -1292,7 +1566,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => applyFormatting('textDecoration', 'underline')}
-                className="p-1.5 rounded-lg cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
+                className="p-1.5 rounded-md cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
                 title="Underline"
               >
                 <Underline className="w-3.5 h-3.5" />
@@ -1300,7 +1574,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
             </div>
 
             {/* Alignments */}
-            <div className="flex items-center gap-0.5 bg-slate-800 p-1 rounded-xl border border-slate-700 shrink-0">
+            <div className="flex items-center gap-0.5 bg-slate-800/90 p-0.5 rounded-lg border border-slate-700/80 shrink-0">
               {(['right', 'center', 'left', 'justify'] as const).map((align) => {
                 const Icon = align === 'right' ? AlignRight : align === 'center' ? AlignCenter : align === 'left' ? AlignLeft : AlignJustify;
                 return (
@@ -1308,7 +1582,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                     key={align}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => applyFormatting('alignment', align)}
-                    className="p-1.5 rounded-lg cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
+                    className="p-1.5 rounded-md cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
                     title={align}
                   >
                     <Icon className="w-3.5 h-3.5" />
@@ -1318,13 +1592,13 @@ export const BookEditor: React.FC<BookEditorProps> = ({
             </div>
 
             {/* Action Group: Copy Menu & Image Button */}
-            <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-slate-700 shrink-0">
+            <div className="flex items-center gap-1 bg-slate-800/90 p-0.5 rounded-lg border border-slate-700/80 shrink-0">
               {/* Qalam Copy System Dropdown inside toolbar */}
               <div className="relative inline-block text-left" ref={dropdownRef}>
                 <button
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => setIsCopyMenuOpen(!isCopyMenuOpen)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white font-bold font-urdu text-[11px] rounded-lg transition-all cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white font-bold font-urdu text-[10px] rounded-md transition-all cursor-pointer"
                 >
                   <Clipboard className="w-3 h-3 text-[#D4AF37]" />
                   <span>📋 کاپی</span>
@@ -1332,7 +1606,6 @@ export const BookEditor: React.FC<BookEditorProps> = ({
 
                 {isCopyMenuOpen && (
                   <div className="absolute right-0 mt-2 w-52 rounded-xl bg-[#0F172A] border border-[#D4AF37]/30 shadow-xl z-50 py-1.5 text-right font-urdu text-slate-200">
-                    {/* Option 1: Copy Selected Text */}
                     <button
                       onClick={() => {
                         handleCopySelectedText();
@@ -1349,7 +1622,6 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                       {!hasSelection && <span className="text-[9px] text-slate-500 font-normal">(پہلے متن منتخب کریں)</span>}
                     </button>
 
-                    {/* Option 2: Copy Current Portion / Chapter */}
                     {editorPage.startsWith('chapter_') && (
                       <button
                         onClick={() => {
@@ -1386,7 +1658,6 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                       </button>
                     )}
 
-                    {/* Option 3: Copy Full Book */}
                     <button
                       onClick={() => {
                         handleCopyFullBook();
@@ -1405,18 +1676,15 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                 <button
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white font-bold font-urdu text-[11px] rounded-lg transition-all cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white font-bold font-urdu text-[10px] rounded-md transition-all cursor-pointer"
                 >
                   <span>🖼️ تصویر</span>
                 </button>
               )}
             </div>
-          </div>
 
-          {/* Row 3: Spacing | Up | Down | Page Break | Reset */}
-          <div className="flex flex-wrap items-center gap-2 w-full justify-start text-xs">
             {/* Spacing Slider */}
-            <div className="flex items-center gap-2 bg-slate-800 px-2 py-1 rounded-xl border border-slate-700 shrink-0">
+            <div className="flex items-center gap-1.5 bg-slate-800/90 px-2 py-1 rounded-lg border border-slate-700/80 shrink-0">
               <span className="text-slate-300 text-[10px] whitespace-nowrap">فاصلہ:</span>
               <input
                 type="range"
@@ -1424,7 +1692,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                 max="60"
                 value={currentStyles.spacing !== undefined ? currentStyles.spacing : 12}
                 onChange={(e) => updateStylesForPath(activeFieldPath, { spacing: parseInt(e.target.value) })}
-                className="w-16 sm:w-20 accent-[#D4AF37] h-1 bg-slate-900 cursor-pointer"
+                className="w-14 sm:w-20 accent-[#D4AF37] h-1 bg-slate-900 cursor-pointer"
               />
               <span className="text-amber-200 font-mono text-[10px] min-w-[14px] text-right">
                 {currentStyles.spacing !== undefined ? currentStyles.spacing : 12}
@@ -1432,11 +1700,11 @@ export const BookEditor: React.FC<BookEditorProps> = ({
             </div>
 
             {/* Positional Offsets (Up / Down) */}
-            <div className="flex items-center gap-0.5 bg-slate-800 p-1 rounded-xl border border-slate-700 shrink-0">
+            <div className="flex items-center gap-0.5 bg-slate-800/90 p-0.5 rounded-lg border border-slate-700/80 shrink-0">
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => updateStylesForPath(activeFieldPath, { positionOffset: (currentStyles.positionOffset || 0) - 2 })}
-                className="px-2 py-1 bg-slate-900 rounded-lg text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer text-[10px]"
+                className="px-1.5 py-1 bg-slate-900 rounded text-slate-300 hover:text-white flex items-center gap-0.5 cursor-pointer text-[10px]"
                 title="تھوڑا اوپر کریں"
               >
                 <MoveUp className="w-3 h-3 text-[#D4AF37]" />
@@ -1445,7 +1713,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => updateStylesForPath(activeFieldPath, { positionOffset: (currentStyles.positionOffset || 0) + 2 })}
-                className="px-2 py-1 bg-slate-900 rounded-lg text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer text-[10px]"
+                className="px-1.5 py-1 bg-slate-900 rounded text-slate-300 hover:text-white flex items-center gap-0.5 cursor-pointer text-[10px]"
                 title="تھوڑا نیچے کریں"
               >
                 <MoveDown className="w-3 h-3 text-[#D4AF37]" />
@@ -1454,11 +1722,11 @@ export const BookEditor: React.FC<BookEditorProps> = ({
             </div>
 
             {/* Page Break Toggle */}
-            <div className="flex items-center bg-slate-800 p-0.5 rounded-xl border border-slate-700 shrink-0">
+            <div className="flex items-center bg-slate-800/90 p-0.5 rounded-lg border border-slate-700/80 shrink-0">
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => updateStylesForPath(activeFieldPath, { pageBreakBefore: !currentStyles.pageBreakBefore })}
-                className={`p-1.5 rounded-lg transition-all cursor-pointer shrink-0 ${
+                className={`p-1.5 rounded-md transition-all cursor-pointer shrink-0 ${
                   currentStyles.pageBreakBefore
                     ? 'bg-amber-500 text-[#0F172A] shadow-md'
                     : 'text-slate-300 hover:text-white'
@@ -1470,24 +1738,24 @@ export const BookEditor: React.FC<BookEditorProps> = ({
             </div>
 
             {/* Reset Styles */}
-            <div className="flex items-center bg-slate-800 p-0.5 rounded-xl border border-slate-700 shrink-0">
+            <div className="flex items-center bg-slate-800/90 p-0.5 rounded-lg border border-slate-700/80 shrink-0">
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleResetStylesForPath(activeFieldPath)}
-                className="p-1.5 text-rose-300 hover:text-rose-200 rounded-lg cursor-pointer transition-colors"
+                className="p-1.5 text-rose-300 hover:text-rose-200 rounded-md cursor-pointer transition-colors"
                 title="فارمیٹنگ ری سیٹ کریں"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
             </div>
-          </div>
 
-          {/* Quick Real-Time Selection Warning / Feedback */}
-          {toolbarError && (
-            <div className="text-rose-400 text-xs font-bold px-3 py-1.5 bg-rose-500/10 border border-rose-500/20 rounded-xl animate-pulse self-start">
-              {toolbarError}
-            </div>
-          )}
+            {/* Quick Real-Time Selection Warning / Feedback */}
+            {toolbarError && (
+              <div className="text-rose-400 text-[10px] font-bold px-2 py-1 bg-rose-500/10 border border-rose-500/20 rounded-lg animate-pulse shrink-0">
+                {toolbarError}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1518,13 +1786,13 @@ export const BookEditor: React.FC<BookEditorProps> = ({
         {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             3. TRUE A4 BOOK PAGE CONTAINER (WYSIWYG CANVAS)
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-        <div className="flex justify-center py-4 bg-slate-200/50 border border-slate-300 rounded-3xl min-h-[500px] overflow-hidden">
+        <div className="flex justify-center py-6 px-2 sm:px-4 bg-slate-200/70 border border-slate-300 rounded-2xl min-h-[500px] overflow-x-auto">
           
           {/* Cover Layout Rendering */}
           {editorPage === 'cover' && (
             <div
               style={{ backgroundColor: coverConfig.backgroundColor || '#0F172A' }}
-              className={`${getContainerSizeClasses()} text-slate-100 p-5 flex flex-col justify-between relative overflow-hidden book-shadow border-2 border-slate-800 transition-all duration-300`}
+              className={`${getContainerSizeClasses()} text-slate-100 p-5 sm:p-7 flex flex-col justify-between relative overflow-hidden shadow-2xl shadow-slate-900/40 rounded-sm border-2 border-slate-800 transition-all duration-300`}
             >
               {/* Cover Double Frame */}
               {coverConfig.showFrameBorder !== false && (
@@ -1568,9 +1836,10 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                   )}
 
                   {/* Inline Editable Title */}
-                  <div className="px-2">
+                  <div className="px-2 mb-2 sm:mb-3">
                     <input
                       type="text"
+                      dir="rtl"
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
                       placeholder="کتاب کا عنوان"
@@ -1580,9 +1849,10 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                   </div>
 
                   {/* Inline Editable Subtitle */}
-                  <div className="px-2 max-w-md mx-auto">
+                  <div className="px-2 max-w-md mx-auto mt-1.5 sm:mt-2">
                     <input
                       type="text"
+                      dir="rtl"
                       value={subtitle}
                       onChange={(e) => setSubtitle(e.target.value)}
                       placeholder="کتاب کا ذیلی عنوان"
@@ -1608,6 +1878,7 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                   <p style={{ color: coverConfig.themeColor || '#D4AF37' }} className="text-[10px] uppercase tracking-wider mb-1">مصنّف</p>
                   <input
                     type="text"
+                    dir="rtl"
                     value={authorName}
                     onChange={(e) => setAuthorName(e.target.value)}
                     placeholder="مصنف کا نام"
@@ -1621,8 +1892,8 @@ export const BookEditor: React.FC<BookEditorProps> = ({
 
           {/* Title & Preface Page Rendering */}
           {editorPage === 'title_page' && (
-            <div className={`${getContainerSizeClasses()} bg-[#FAF8F5] text-slate-900 rounded-2xl p-3 sm:p-4 border-2 border-slate-800 book-shadow relative flex flex-col justify-between`}>
-              <div className="w-full h-full border border-[#D4AF37]/80 rounded-xl p-4 sm:p-6 flex flex-col justify-between relative bg-white/70">
+            <div className={`${getContainerSizeClasses()} bg-white text-slate-900 rounded-sm p-3 sm:p-6 md:p-8 shadow-2xl shadow-slate-900/15 border border-slate-300/80 relative flex flex-col justify-between transition-all`}>
+              <div className="w-full h-full border border-[#D4AF37]/80 rounded-sm p-3 sm:p-5 md:p-6 flex flex-col justify-between relative bg-white">
                 
                 {/* Header */}
                 <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-3 text-[10px] sm:text-xs text-slate-500 font-urdu">
@@ -1632,9 +1903,9 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                 </div>
 
                 {/* Body Content */}
-                <div className="flex-1 overflow-y-auto space-y-4 font-urdu text-right">
-                  <div className="text-center space-y-2">
-                    <h2 style={{ fontSize: `${Math.max(20, Math.round(titleFontSize * 0.8))}px` }} className="font-bold text-[#0F172A] leading-relaxed">
+                <div className="flex-1 overflow-y-auto space-y-4 font-urdu text-right" dir="rtl">
+                  <div className="text-center space-y-2.5 sm:space-y-3 mb-4 sm:mb-6">
+                    <h2 style={{ fontSize: `${Math.max(20, Math.round(titleFontSize * 0.8))}px` }} className="font-bold text-[#0F172A] leading-relaxed mb-2">
                       {title}
                     </h2>
                     <p className="text-xs sm:text-sm text-slate-600">{subtitle}</p>
@@ -1642,21 +1913,20 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                     <div className="w-16 h-0.5 bg-[#D4AF37] mx-auto my-2" />
                   </div>
 
-                  {/* WYSIWYG Editable Preface Note */}
+                  {/* WYSIWYG Editable Preface Note with RTL Caret Preservation */}
                   <div className="space-y-1.5">
                     <label className="block text-[11px] font-bold text-slate-700 font-urdu text-right">
                       پیش لفظ و مقدمہ کی عبارت درج کریں:
                     </label>
-                    <div
-                      contentEditable
-                      suppressContentEditableWarning
-                      onInput={(e) => setPrefaceNote(e.currentTarget.innerHTML)}
-                      onBlur={(e) => setPrefaceNote(e.currentTarget.innerHTML)}
+                    <RtlEditableField
+                      html={prefaceNote}
+                      onChange={setPrefaceNote}
+                      onBlur={setPrefaceNote}
                       onFocus={() => setActiveFieldPath({ type: 'prefaceNote' })}
-                      style={{ minHeight: '240px', overflowY: 'auto', ...getStyleCss(prefaceStyles) }}
+                      style={{ minHeight: '240px', overflowY: 'auto', fontSize: `${effectiveFontSize}px`, lineHeight: '2.15', textAlign: 'justify', textJustify: 'inter-word', fontFamily: "'Noto Nastaliq Urdu', 'Noto Naskh Arabic', 'Amiri', serif", ...getStyleCss(prefaceStyles) }}
                       className={inputStyleClass({ type: 'prefaceNote' }) + " p-3 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#D4AF37] empty:before:content-[attr(data-placeholder)] empty:before:text-slate-400"}
                       data-placeholder="پیش لفظ کے خیالات یہاں درج کریں..."
-                      dangerouslySetInnerHTML={{ __html: prefaceNote }}
+                      dir="rtl"
                     />
                   </div>
                   {renderA4ImageSection()}
@@ -1677,8 +1947,8 @@ export const BookEditor: React.FC<BookEditorProps> = ({
 
           {/* Table of Contents Preview/Interactive page */}
           {editorPage === 'toc' && (
-            <div className={`${getContainerSizeClasses()} bg-[#FAF8F5] text-slate-900 rounded-2xl p-3 sm:p-4 border-2 border-slate-800 book-shadow relative flex flex-col justify-between`}>
-              <div className="w-full h-full border border-[#D4AF37]/80 rounded-xl p-4 sm:p-6 flex flex-col justify-between relative bg-white/70">
+            <div className={`${getContainerSizeClasses()} bg-white text-slate-900 rounded-sm p-3 sm:p-6 md:p-8 shadow-2xl shadow-slate-900/15 border border-slate-300/80 relative flex flex-col justify-between transition-all`}>
+              <div className="w-full h-full border border-[#D4AF37]/80 rounded-sm p-3 sm:p-5 md:p-6 flex flex-col justify-between relative bg-white">
                 
                 {/* Header */}
                 <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-3 text-[10px] sm:text-xs text-slate-500 font-urdu">
@@ -1760,8 +2030,8 @@ export const BookEditor: React.FC<BookEditorProps> = ({
             const pageNum = chIdx + 3;
 
             return (
-              <div className={`${getContainerSizeClasses()} bg-[#FAF8F5] text-slate-900 rounded-2xl p-3 sm:p-4 border-2 border-slate-800 book-shadow relative flex flex-col justify-between`}>
-                <div className="w-full h-full border border-[#D4AF37]/80 rounded-xl p-4 sm:p-6 flex flex-col justify-between relative bg-white/70">
+              <div className={`${getContainerSizeClasses()} bg-white text-slate-900 rounded-sm p-3 sm:p-6 md:p-8 shadow-2xl shadow-slate-900/15 border border-slate-300/80 relative flex flex-col justify-between transition-all`}>
+                <div className="w-full h-full border border-[#D4AF37]/80 rounded-sm p-3 sm:p-5 md:p-6 flex flex-col justify-between relative bg-white">
                   
                   {/* Header */}
                   <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-3 text-[10px] sm:text-xs text-slate-500 font-urdu">
@@ -1771,37 +2041,35 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                   </div>
 
                   {/* Chapter Body Editor */}
-                  <div className="flex-1 overflow-y-auto space-y-4 font-urdu text-right">
+                  <div className="flex-1 overflow-y-auto space-y-4 font-urdu text-right" dir="rtl">
                     
                     {/* Chapter Title Input */}
-                    <div className="border-b border-slate-300 pb-2 text-center">
-                      <span className="text-xs font-bold text-[#D4AF37] block mb-0.5">باب {chIdx + 1}</span>
-                      <div
-                        contentEditable
-                        suppressContentEditableWarning
-                        onInput={(e) => handleUpdateChapterTitle(chIdx, e.currentTarget.innerHTML)}
-                        onBlur={(e) => handleUpdateChapterTitle(chIdx, e.currentTarget.innerHTML)}
+                    <div className="border-b border-slate-300 pb-3 mb-4 text-center">
+                      <span className="text-xs font-bold text-[#D4AF37] block mb-1">باب {chIdx + 1}</span>
+                      <RtlEditableField
+                        html={chap.title}
+                        onChange={(val) => handleUpdateChapterTitle(chIdx, val)}
+                        onBlur={(val) => handleUpdateChapterTitle(chIdx, val)}
                         onFocus={() => setActiveFieldPath({ type: 'chapterTitle', chIdx })}
                         style={getStyleCss(chap.titleStyles)}
-                        className="w-full text-center bg-transparent border-b border-transparent hover:border-slate-300 focus:border-[#D4AF37] focus:outline-none font-bold text-[#0F172A] leading-snug py-1"
+                        className="w-full text-center bg-transparent border-b border-transparent hover:border-slate-300 focus:border-[#D4AF37] focus:outline-none font-bold text-[#0F172A] leading-relaxed py-1"
                         data-placeholder="باب کا عنوان لکھیں..."
-                        dangerouslySetInnerHTML={{ __html: chap.title }}
+                        dir="rtl"
                       />
                     </div>
 
                     {/* Chapter Summary Input */}
                     <div className="space-y-1">
                       <label className="block text-[10px] font-bold text-slate-500">خلاصہ باب (Summary):</label>
-                      <div
-                        contentEditable
-                        suppressContentEditableWarning
-                        onInput={(e) => handleUpdateChapterSummary(chIdx, e.currentTarget.innerHTML)}
-                        onBlur={(e) => handleUpdateChapterSummary(chIdx, e.currentTarget.innerHTML)}
+                      <RtlEditableField
+                        html={chap.summary || ''}
+                        onChange={(val) => handleUpdateChapterSummary(chIdx, val)}
+                        onBlur={(val) => handleUpdateChapterSummary(chIdx, val)}
                         onFocus={() => setActiveFieldPath({ type: 'chapterSummary', chIdx })}
                         className={inputStyleClass({ type: 'chapterSummary', chIdx }) + " p-2.5 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#D4AF37] empty:before:content-[attr(data-placeholder)] empty:before:text-slate-400"}
                         data-placeholder="اس باب کا خلاصہ یہاں درج کریں..."
                         style={{ minHeight: '60px', overflowY: 'auto', fontSize: `${Math.max(12, effectiveFontSize - 2)}px` }}
-                        dangerouslySetInnerHTML={{ __html: chap.summary || '' }}
+                        dir="rtl"
                       />
                     </div>
 
@@ -1809,32 +2077,30 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                     <div className="space-y-4">
                       {chap.sections && chap.sections.length > 0 ? (
                         chap.sections.map((sec, secIdx) => (
-                          <div key={secIdx} className="space-y-2 border-b border-slate-200/80 pb-3 last:border-b-0 last:pb-0">
+                          <div key={secIdx} className="space-y-3 sm:space-y-4 border-b border-slate-200/80 pb-4 mb-2 last:border-b-0 last:pb-0">
                             
                             {/* Section Heading Input */}
-                            <div
-                              contentEditable
-                              suppressContentEditableWarning
-                              onInput={(e) => handleUpdateSectionHeading(chIdx, secIdx, e.currentTarget.innerHTML)}
-                              onBlur={(e) => handleUpdateSectionHeading(chIdx, secIdx, e.currentTarget.innerHTML)}
+                            <RtlEditableField
+                              html={sec.heading}
+                              onChange={(val) => handleUpdateSectionHeading(chIdx, secIdx, val)}
+                              onBlur={(val) => handleUpdateSectionHeading(chIdx, secIdx, val)}
                               onFocus={() => setActiveFieldPath({ type: 'sectionHeading', chIdx, secIdx })}
                               style={getStyleCss(sec.headingStyles)}
-                              className="w-full bg-slate-100/90 hover:bg-slate-200/50 px-3 py-1.5 rounded-lg border-r-4 rtl:border-r-4 border-[#D4AF37] font-bold text-[#0F172A] focus:outline-none focus:ring-1 focus:ring-[#D4AF37]"
+                              className="w-full bg-slate-100/90 hover:bg-slate-200/50 px-3.5 py-2 rounded-lg border-r-4 rtl:border-r-4 border-[#D4AF37] font-bold text-[#0F172A] focus:outline-none focus:ring-1 focus:ring-[#D4AF37] mb-2 sm:mb-3 leading-relaxed"
                               data-placeholder="ذیلی عنوان لکھیں..."
-                              dangerouslySetInnerHTML={{ __html: sec.heading }}
+                              dir="rtl"
                             />
 
                             {/* Section Content Textarea */}
-                            <div
-                              contentEditable
-                              suppressContentEditableWarning
-                              onInput={(e) => handleUpdateSectionContent(chIdx, secIdx, e.currentTarget.innerHTML)}
-                              onBlur={(e) => handleUpdateSectionContent(chIdx, secIdx, e.currentTarget.innerHTML)}
+                            <RtlEditableField
+                              html={sec.content}
+                              onChange={(val) => handleUpdateSectionContent(chIdx, secIdx, val)}
+                              onBlur={(val) => handleUpdateSectionContent(chIdx, secIdx, val)}
                               onFocus={() => setActiveFieldPath({ type: 'sectionContent', chIdx, secIdx })}
-                              style={{ minHeight: '160px', overflowY: 'auto', fontSize: `${effectiveFontSize}px`, ...getStyleCss(sec.contentStyles) }}
+                              style={{ minHeight: '160px', overflowY: 'auto', fontSize: `${effectiveFontSize}px`, lineHeight: '2.15', textAlign: 'justify', textJustify: 'inter-word', fontFamily: "'Noto Nastaliq Urdu', 'Noto Naskh Arabic', 'Amiri', serif", ...getStyleCss(sec.contentStyles) }}
                               className={inputStyleClass({ type: 'sectionContent', chIdx, secIdx }) + " p-3 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#D4AF37] empty:before:content-[attr(data-placeholder)] empty:before:text-slate-400"}
                               data-placeholder="سیکشن کا تفصیلی متن یہاں درج کریں..."
-                              dangerouslySetInnerHTML={{ __html: sec.content }}
+                              dir="rtl"
                             />
                           </div>
                         ))
@@ -1863,8 +2129,8 @@ export const BookEditor: React.FC<BookEditorProps> = ({
 
           {/* Conclusion Page Rendering */}
           {editorPage === 'conclusion' && (
-            <div className={`${getContainerSizeClasses()} bg-[#FAF8F5] text-slate-900 rounded-2xl p-3 sm:p-4 border-2 border-slate-800 book-shadow relative flex flex-col justify-between`}>
-              <div className="w-full h-full border border-[#D4AF37]/80 rounded-xl p-4 sm:p-6 flex flex-col justify-between relative bg-white/70">
+            <div className={`${getContainerSizeClasses()} bg-white text-slate-900 rounded-sm p-3 sm:p-6 md:p-8 shadow-2xl shadow-slate-900/15 border border-slate-300/80 relative flex flex-col justify-between transition-all`}>
+              <div className="w-full h-full border border-[#D4AF37]/80 rounded-sm p-3 sm:p-5 md:p-6 flex flex-col justify-between relative bg-white">
                 
                 {/* Header */}
                 <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-3 text-[10px] sm:text-xs text-slate-500 font-urdu">
@@ -1874,24 +2140,23 @@ export const BookEditor: React.FC<BookEditorProps> = ({
                 </div>
 
                 {/* Conclusion Body */}
-                <div className="flex-1 overflow-y-auto space-y-4 font-urdu text-right">
-                  <div className="text-center pb-2 border-b border-slate-300">
-                    <h3 style={{ fontSize: `${chapterHeadingFontSize}px` }} className="font-bold text-[#0F172A]">اختتامیہ و حاصلِ کلام</h3>
-                    <p className="text-xs text-slate-500">خلاصہ اور سفارشات</p>
+                <div className="flex-1 overflow-y-auto space-y-4 font-urdu text-right" dir="rtl">
+                  <div className="text-center pb-3 mb-4 border-b border-slate-300">
+                    <h3 style={{ fontSize: `${chapterHeadingFontSize}px` }} className="font-bold text-[#0F172A] leading-relaxed">اختتامیہ و حاصلِ کلام</h3>
+                    <p className="text-xs text-slate-500 mt-1">خلاصہ اور سفارشات</p>
                   </div>
 
                   <div className="space-y-1.5">
                     <label className="block text-[11px] font-bold text-slate-700">کتاب کی اختتامی تحریر یہاں ایڈٹ کریں:</label>
-                    <div
-                      contentEditable
-                      suppressContentEditableWarning
-                      onInput={(e) => setConclusionNote(e.currentTarget.innerHTML)}
-                      onBlur={(e) => setConclusionNote(e.currentTarget.innerHTML)}
+                    <RtlEditableField
+                      html={conclusionNote}
+                      onChange={setConclusionNote}
+                      onBlur={setConclusionNote}
                       onFocus={() => setActiveFieldPath({ type: 'conclusionNote' })}
-                      style={{ minHeight: '240px', overflowY: 'auto', ...getStyleCss(conclusionStyles) }}
+                      style={{ minHeight: '240px', overflowY: 'auto', fontSize: `${effectiveFontSize}px`, lineHeight: '2.15', textAlign: 'justify', textJustify: 'inter-word', fontFamily: "'Noto Nastaliq Urdu', 'Noto Naskh Arabic', 'Amiri', serif", ...getStyleCss(conclusionStyles) }}
                       className={inputStyleClass({ type: 'conclusionNote' }) + " p-3 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#D4AF37] empty:before:content-[attr(data-placeholder)] empty:before:text-slate-400"}
                       data-placeholder="اختتامی کلمات درج کریں..."
-                      dangerouslySetInnerHTML={{ __html: conclusionNote }}
+                      dir="rtl"
                     />
                   </div>
                   {renderA4ImageSection()}
@@ -1931,18 +2196,6 @@ export const BookEditor: React.FC<BookEditorProps> = ({
           accept="image/*"
           className="hidden"
         />
-
-        {/* Custom Thin Caret Element */}
-        {caretPos.visible && (
-          <div
-            className="custom-caret"
-            style={{
-              top: `${caretPos.top}px`,
-              left: `${caretPos.left}px`,
-              height: `${caretPos.height}px`,
-            }}
-          />
-        )}
 
       </div>
     </section>

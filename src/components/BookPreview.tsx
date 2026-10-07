@@ -658,13 +658,13 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
 
             {/* Chapter Body */}
             <div className="space-y-3 flex-1 overflow-y-auto">
-              <div className="border-b border-slate-300 pb-2 text-center">
-                <span className="text-xs font-bold font-urdu text-[#D4AF37] block mb-0.5">
+              <div className="border-b border-slate-300 pb-3 mb-3 sm:mb-4 text-center">
+                <span className="text-xs font-bold font-urdu text-[#D4AF37] block mb-1">
                   باب {chIdx + 1}
                 </span>
                 <h3
                   style={{ fontSize: `${chapterHeadingFontSize}px`, ...getStyleCss(currentChap?.titleStyles) }}
-                  className="font-bold font-urdu text-[#0F172A] leading-snug"
+                  className="font-bold font-urdu text-[#0F172A] leading-relaxed"
                 >
                   {currentChap?.title || `باب ${chIdx + 1}`}
                 </h3>
@@ -697,11 +697,11 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                     }
 
                     return (
-                      <div key={sIdx} style={getStyleCss(sec.contentStyles)} className="space-y-1.5 border-b border-slate-200/80 pb-2.5 last:border-b-0">
+                      <div key={sIdx} style={getStyleCss(sec.contentStyles)} className="space-y-2.5 sm:space-y-3 border-b border-slate-200/80 pb-3.5 last:border-b-0">
                         {sec.heading && !isRedundant && (
                           <h4
                             style={{ fontSize: `${sectionHeadingFontSize}px`, ...getStyleCss(sec.headingStyles) }}
-                            className="font-bold text-[#0F172A] bg-slate-100/90 px-3 py-1.5 rounded-lg border-r-4 rtl:border-r-4 rtl:border-l-0 border-[#D4AF37]"
+                            className="font-bold text-[#0F172A] bg-slate-100/90 px-3.5 py-2 rounded-lg border-r-4 rtl:border-r-4 rtl:border-l-0 border-[#D4AF37] mb-2 sm:mb-2.5 leading-relaxed"
                           >
                             {sec.heading}
                           </h4>
@@ -811,8 +811,8 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
           <span className="hidden sm:inline">{t.prevPage}</span>
         </button>
 
-        <span className="font-mono font-bold text-[#D4AF37] px-1.5 text-xs">
-          {currentIdx + 1} / {pageOrder.length}
+        <span className="font-urdu font-bold text-[#D4AF37] px-2 text-xs">
+          {currentPage === 'cover' ? 'سرورق' : `صفحہ ${toUrduDigits(currentIdx)}`}
         </span>
 
         <button
@@ -1712,17 +1712,13 @@ export const BookPreview: React.FC<BookPreviewProps> = ({
                         }`}
                       >
                         <span className="truncate max-w-[170px]">{pageLabel}</span>
-                        <span className="text-[10px] opacity-80 font-mono">
-                          {toUrduDigits(pIdx + 1)}
+                        <span className="text-[10px] opacity-80 font-urdu">
+                          {pg === 'cover' ? '' : `صفحہ ${toUrduDigits(pIdx)}`}
                         </span>
                       </button>
                     );
                   })}
                 </div>
-              </div>
-
-              <div className="text-center pt-2 text-[10px] text-slate-400 border-t border-slate-800 mt-3 shrink-0">
-                کل صفحات: {toUrduDigits(pageOrder.length)}
               </div>
             </div>
           )}
