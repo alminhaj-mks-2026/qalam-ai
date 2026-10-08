@@ -1,6 +1,4 @@
-import app from '../server';
-
-console.log('[DIAGNOSTIC] [STARTUP] ENTRY → SERVER IMPORT SUCCESSFUL');
+console.log('[DIAGNOSTIC] ENTRY');
 
 // Process-level unhandled rejection / uncaught exception traps for Vercel Serverless runtime
 if (typeof process !== 'undefined') {
@@ -19,9 +17,64 @@ if (typeof process !== 'undefined') {
   });
 }
 
-export default function handler(req: any, res: any) {
+let appInstance: any = null;
+let appInitError: any = null;
+let appInitPromise: Promise<any> | null = null;
+
+async function getApp() {
+  if (appInstance) return appInstance;
+  if (appInitError) throw appInitError;
+  if (!appInitPromise) {
+    appInitPromise = (async () => {
+      try {
+        console.log('[DIAGNOSTIC] SERVER_IMPORT_START');
+        const serverModule: any = await import('../server');
+        const loadedApp = serverModule.default || serverModule.app || serverModule;
+        console.log('[DIAGNOSTIC] SERVER_IMPORT_SUCCESS');
+        console.log('[DIAGNOSTIC] APP_INITIALIZED');
+        console.log('[DIAGNOSTIC] ROUTES_REGISTERED');
+        appInstance = loadedApp;
+        return appInstance;
+      } catch (err: any) {
+        appInitError = err;
+        console.error('[DIAGNOSTIC] REQUEST_ERROR [MODULE LOAD]:', {
+          message: err?.message || String(err),
+          stack: err?.stack || 'No stack trace available',
+        });
+        throw err;
+      }
+    })();
+  }
+  return appInitPromise;
+}
+
+// Eagerly initiate server loading on container startup
+getApp().catch((err: any) => {
+  // Error already logged and stored in appInitError
+});
+
+export default async function handler(req: any, res: any) {
   const reqStart = Date.now();
-  console.log(`[DIAGNOSTIC] [REQUEST RECEIVED] ${req.method} ${req.url} (originalUrl: ${req.originalUrl || 'N/A'})`);
+  console.log(`[DIAGNOSTIC] REQUEST_RECEIVED: ${req.method} ${req.url} (originalUrl: ${req.originalUrl || 'N/A'})`);
+
+  let app: any;
+  try {
+    app = await getApp();
+  } catch (initErr: any) {
+    console.error('[DIAGNOSTIC] REQUEST_ERROR [APP INIT FAILED]:', {
+      message: initErr?.message || String(initErr),
+      stack: initErr?.stack || 'No stack trace available',
+    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: 'سرور ماڈیول لوڈ کرنے میں ناکامی۔',
+        message: initErr?.message || String(initErr),
+        stack: initErr?.stack || 'No stack trace available',
+      });
+    }
+    return;
+  }
 
   return new Promise<void>((resolve) => {
     let resolved = false;
@@ -37,9 +90,9 @@ export default function handler(req: any, res: any) {
     res.on('finish', safeResolve);
     res.on('close', safeResolve);
     res.on('error', (resErr: any) => {
-      console.error('[DIAGNOSTIC] [RESPONSE STREAM ERROR]:', {
+      console.error('[DIAGNOSTIC] REQUEST_ERROR [RESPONSE STREAM]:', {
         message: resErr?.message || String(resErr),
-        stack: resErr?.stack || 'No stack',
+        stack: resErr?.stack || 'No stack trace available',
       });
       safeResolve();
     });
@@ -47,15 +100,16 @@ export default function handler(req: any, res: any) {
     try {
       app(req, res, (err?: any) => {
         if (err) {
-          console.error('[DIAGNOSTIC] [EXPRESS UNHANDLED ROUTE ERROR]:', {
+          console.error('[DIAGNOSTIC] REQUEST_ERROR [EXPRESS UNHANDLED ROUTE]:', {
             message: err?.message || String(err),
-            stack: err?.stack || 'No stack',
+            stack: err?.stack || 'No stack trace available',
           });
           if (!res.headersSent) {
             res.status(err?.status || 500).json({
               success: false,
               error: err?.message || 'سرور پر غیر متوقع خرابی پیش آئی۔',
-              details: err?.stack || String(err),
+              message: err?.message || String(err),
+              stack: err?.stack || 'No stack trace available',
             });
           }
         } else if (!res.headersSent) {
@@ -68,23 +122,19 @@ export default function handler(req: any, res: any) {
         safeResolve();
       });
     } catch (syncErr: any) {
-      console.error('[DIAGNOSTIC] [SYNCHRONOUS HANDLER EXCEPTION]:', {
+      console.error('[DIAGNOSTIC] REQUEST_ERROR [SYNCHRONOUS HANDLER]:', {
         message: syncErr?.message || String(syncErr),
-        stack: syncErr?.stack || 'No stack',
+        stack: syncErr?.stack || 'No stack trace available',
       });
       if (!res.headersSent) {
         res.status(500).json({
           success: false,
           error: 'سرور کی پروسیسنگ کے دوران غیر متوقع خرابی پیش آئی۔',
-          details: syncErr?.message || String(syncErr),
-          stack: syncErr?.stack,
+          message: syncErr?.message || String(syncErr),
+          stack: syncErr?.stack || 'No stack trace available',
         });
       }
       safeResolve();
     }
   });
 }
-
-export { app };
-
-

@@ -1,0 +1,25 @@
+{
+  "jobId": "job_ccf6627094_1791464509154",
+  "contentHash": "ccf66270946fe389eb0ea9a1f2312a094878d80e7052148cc5c2e2d49413d075",
+  "createdAt": 1791464509155,
+  "updatedAt": 1791464509156,
+  "status": "in_progress",
+  "currentStage": "searching",
+  "currentChapterIndex": 0,
+  "totalChapters": 0,
+  "progressPercent": 8,
+  "message": "مسودے کے مآخذ، فکری ربط اور تحقیقی مواد کی جانچ (Searching & Analyzing Sources)...",
+  "modelUsed": "gemini-3.8-flash",
+  "attempts": 1,
+  "params": {
+    "content": "مطالعہ صرف معلومات کا نام نہیں، بلکہ یہ انسان کی سوچ کو نئی زندگی عطا کرتا ہے۔ خواب دیکھنا آسان ہے، لیکن خوابوں کی قیمت محنت، صبر اور مسلسل جدوجہد سے ادا کی جاتی ہے۔",
+    "authorName": "عبد الحفیظ",
+    "genre": "general",
+    "language": "ur"
+  },
+  "completedChapters": {},
+  "isProcessing": true,
+  "lastAttemptAt": 1791464509155,
+  "error": null,
+  "quotaErrorInfo": null
+}

@@ -29,12 +29,12 @@ app.use((req, res, next) => {
   const queryPath = (req.query?.path as string) || (req.query?.['1'] as string) || (req.query?.['0'] as string);
 
   // If Vercel rewrote /api/generate-book to /api?1=generate-book or /api?path=generate-book
-  if (queryPath && (req.url === '/api' || req.url.startsWith('/api?'))) {
+  if (queryPath && (req.url === '/api' || req.url.startsWith('/api?') || req.url === '/' || req.url.startsWith('/?'))) {
     const cleanSub = queryPath.startsWith('/') ? queryPath : `/${queryPath}`;
     req.url = `/api${cleanSub}`;
-  } else if (forwardedUrl && (req.url === '/api' || req.url === '/')) {
+  } else if (forwardedUrl && (req.url === '/api' || req.url === '/' || req.url.startsWith('/api?') || req.url.startsWith('/?'))) {
     req.url = forwardedUrl;
-  } else if (matchedPath && (req.url === '/api' || req.url === '/') && matchedPath !== '/api') {
+  } else if (matchedPath && (req.url === '/api' || req.url === '/' || req.url.startsWith('/api?') || req.url.startsWith('/?')) && matchedPath !== '/api') {
     req.url = matchedPath;
   }
 
@@ -658,10 +658,14 @@ app.post(['/api/generate-pdf', '/generate-pdf'], async (req, res) => {
     
     return res.end(finalBuffer);
   } catch (error: any) {
-    console.error('Error generating PDF:', error);
+    console.error('[DIAGNOSTIC] REQUEST_ERROR [PDF GENERATION]:', {
+      message: error?.message || String(error),
+      stack: error?.stack || 'No stack trace available',
+    });
     res.status(500).json({ 
       error: 'پی ڈی ایف بنانے کے دوران سرور پر خرابی پیش آئی۔',
-      details: error.message 
+      details: error?.message || String(error),
+      stack: error?.stack || 'No stack trace available',
     });
   } finally {
     if (browser) {
@@ -1645,16 +1649,8 @@ app.get(['/api/generate-book/status/:jobId', '/generate-book/status/:jobId'], (r
     });
   }
 
-  // CRITICAL: If job was in_progress on disk but has no worker running in RAM and was stalled (>15s):
-  // Automatically self-heal / resume the worker so client polling does NOT hang forever at 5% / searching!
-  if (job.status === 'in_progress' && !activeJobWorkers.has(job.jobId) && Date.now() - job.updatedAt > 15000 && !cancelledJobIds.has(job.jobId)) {
-    console.log(`[Job API] Auto-resuming stalled orphan job: ${job.jobId}`);
-    setImmediate(() => {
-      processBookGenerationJob(job.jobId).catch((err) => {
-        console.error(`[Background Worker] Unhandled error in resuming stalled job ${job.jobId}:`, err);
-      });
-    });
-  }
+  // Status polling is STRICTLY READ-ONLY: never spawn background workers from a GET route.
+  // Resumption is only initiated by explicit user action (POST /api/generate-book or Retry).
 
   const completedCount = Object.keys(job.completedChapters || {}).length;
 
@@ -1869,7 +1865,8 @@ async function startServer() {
   app.use('/fonts', express.static('node_modules/@fontsource'));
 
   if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
+    const vitePkg = 'vite';
+    const { createServer: createViteServer } = await import(/* @vite-ignore */ vitePkg);
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

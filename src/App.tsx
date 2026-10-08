@@ -120,6 +120,8 @@ export default function App() {
   const [quotaErrorInfo, setQuotaErrorInfo] = useState<QuotaErrorInfo | null>(null);
   const [generatedBook, setGeneratedBook] = useState<GeneratedBookData | null>(null);
 
+  console.log('[PREVIEW] UI_RENDER', { isGeneratingBook, isFullBookViewOpen, isEditorOpen, title });
+
   // Countdown timer for 429 quota retry readiness
   useEffect(() => {
     if (!quotaErrorInfo || quotaErrorInfo.retryAfterSeconds <= 0) return;
@@ -154,36 +156,6 @@ export default function App() {
       jobIdRef.current = '';
     }
   }, [rawText, attachedFiles]);
-
-  // Background PDF Cache Warmer: Primes the PDF blob in memory as soon as book is ready
-  // Guarantees zero network wait on Share button click, preserving transient user activation on FIRST CLICK!
-  useEffect(() => {
-    if (chapters && chapters.length > 0) {
-      const timer = setTimeout(() => {
-        createBookPdfBlob({
-          title,
-          subtitle,
-          authorName,
-          genre,
-          prefaceNote,
-          conclusionNote,
-          chapters,
-          prefaceStyles,
-          conclusionStyles,
-          rawText,
-          generatedBook,
-          bodyFontSize,
-          pageSize,
-          orientation,
-          autoLayout,
-          coverConfig,
-          prefaceImage,
-          conclusionImage,
-        }).catch((e) => console.warn('[PDF Cache Warmer] Background warming note:', e));
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [title, subtitle, authorName, chapters, coverConfig, pageSize, orientation, bodyFontSize, isFullBookViewOpen, prefaceStyles, conclusionStyles, prefaceImage, conclusionImage]);
 
   /**
    * Seamlessly re-attaches to a running or completed background job
@@ -296,6 +268,7 @@ export default function App() {
 
   // Auto-resume active background job on component mount only if job was actively running
   useEffect(() => {
+    console.log('[PREVIEW] APP_START');
     try {
       const savedJobId = localStorage.getItem('qalam_active_job_id');
       if (savedJobId) {
@@ -343,6 +316,7 @@ export default function App() {
    * Uses central primary model gemini-3.8-flash.
    */
   const handleGenerateBook = async (modelOverride?: SupportedGeminiModel) => {
+    console.log('[PREVIEW] GENERATE_CLICK');
     if (isGeneratingBook || isGeneratingRef.current) {
       console.warn('[handleGenerateBook] Generation already in progress. Ignoring duplicate click.');
       return; // Prevent duplicate requests

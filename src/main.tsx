@@ -3,15 +3,25 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
+console.log('[PREVIEW] APP_START');
+
 // Prevent uncaught errors and rejections from closing the Preview iframe in AI Studio
 if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {
-    console.warn('[Qalam AI] Handled asynchronous error:', event.reason);
+    const reason = event.reason;
+    console.error('[PREVIEW] UNHANDLED_ERROR (Promise Rejection):', {
+      message: reason?.message || String(reason),
+      stack: reason?.stack || 'No stack trace available',
+    });
     event.preventDefault();
   });
 
   window.addEventListener('error', (event) => {
-    console.warn('[Qalam AI] Handled runtime error:', event.error || event.message);
+    const error = event.error;
+    console.error('[PREVIEW] UNHANDLED_ERROR (Runtime Error):', {
+      message: error?.message || event.message || String(error),
+      stack: error?.stack || 'No stack trace available',
+    });
     event.preventDefault();
   });
 }
@@ -36,7 +46,11 @@ class SafeErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('[Qalam AI ErrorBoundary caught error]:', error, errorInfo);
+    console.error('[PREVIEW] UNHANDLED_ERROR (React ErrorBoundary):', {
+      message: error?.message || String(error),
+      stack: error?.stack || 'No stack trace available',
+      componentStack: errorInfo.componentStack,
+    });
   }
 
   render() {

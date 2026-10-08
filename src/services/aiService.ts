@@ -64,6 +64,8 @@ export async function startBookGenerationJob(params: GenerateBookParams): Promis
     });
   }
 
+  console.log('[PREVIEW] REQUEST_START', { title, authorName, genre, language, jobId });
+
   let response: Response;
   try {
     response = await fetch('/api/generate-book', {
@@ -80,7 +82,9 @@ export async function startBookGenerationJob(params: GenerateBookParams): Promis
         jobId,
       }),
     });
+    console.log('[PREVIEW] REQUEST_SENT', { status: response.status, ok: response.ok });
   } catch (netErr: any) {
+    console.error('[PREVIEW] JOB_FAILED', { message: netErr?.message, stack: netErr?.stack });
     throw new AiServiceError({
       message: 'نیٹ ورک کنکشن میں رکاوٹ پیش آئی۔ برائے مہربانی انٹرنیٹ چیک کر کے دوبارہ کوشش کریں۔',
       statusCode: 0,
@@ -100,6 +104,7 @@ export async function startBookGenerationJob(params: GenerateBookParams): Promis
   }
 
   if (!response.ok || !data.success) {
+    console.error('[PREVIEW] JOB_FAILED', { error: data.error, errorCode: data.errorCode });
     throw new AiServiceError({
       message: data.error || 'Gemini AI سروس کے ساتھ رابطہ قائم نہیں ہو سکا۔',
       statusCode: response.status || 500,
@@ -108,6 +113,8 @@ export async function startBookGenerationJob(params: GenerateBookParams): Promis
       retryAfterSeconds: data.retryAfterSeconds || 30,
     });
   }
+
+  console.log('[PREVIEW] JOB_CREATED', { jobId: data.jobId, status: data.status });
 
   return {
     jobId: data.jobId,
@@ -240,6 +247,7 @@ export async function pollBookJobUntilComplete(
   book: GeneratedBookData;
   modelUsed: string;
 }> {
+  console.log('[PREVIEW] POLLING_START', { jobId });
   let consecutiveNetworkErrors = 0;
   const maxNetworkRetries = 10;
   let pollCount = 0;
@@ -251,15 +259,25 @@ export async function pollBookJobUntilComplete(
       const statusData = await getBookJobStatus(jobId);
       consecutiveNetworkErrors = 0;
 
+      console.log('[PREVIEW] POLLING', {
+        jobId,
+        pollCount,
+        status: statusData.status,
+        progressPercent: statusData.progressPercent,
+        stage: statusData.currentStage,
+      });
+
       if (onProgress) {
         onProgress(statusData);
       }
 
       if (statusData.status === 'completed') {
+        console.log('[PREVIEW] JOB_COMPLETED', { jobId });
         return await getBookJobResult(jobId);
       }
 
       if (statusData.status === 'cancelled') {
+        console.log('[PREVIEW] JOB_CANCELLED', { jobId });
         throw new AiServiceError({
           message: 'کتاب کی تیاری منسوخ کر دی گئی ہے۔',
           statusCode: 200,
@@ -268,6 +286,7 @@ export async function pollBookJobUntilComplete(
       }
 
       if (statusData.status === 'failed') {
+        console.error('[PREVIEW] JOB_FAILED', { jobId, error: statusData.error });
         const qErr = statusData.quotaErrorInfo;
         throw new AiServiceError({
           message: statusData.error || 'کتاب کی تیاری کے دوران سرور پر خرابی پیش آئی۔',
@@ -280,12 +299,15 @@ export async function pollBookJobUntilComplete(
         });
       }
     } catch (err: any) {
-      if (err instanceof AiServiceError && err.errorCode !== 'POLL_NETWORK_ERROR') {
+      if (err instanceof AiServiceError && (err.errorCode === 'JOB_CANCELLED' || err.errorCode === 'JOB_FAILED')) {
         throw err;
       }
 
+      // Treat other errors (network blips, transient 500/502/503 during reload) as retryable
       consecutiveNetworkErrors++;
+      console.warn(`[PREVIEW] POLLING retryable note (attempt ${consecutiveNetworkErrors}/${maxNetworkRetries}):`, err?.message);
       if (consecutiveNetworkErrors >= maxNetworkRetries) {
+        console.error('[PREVIEW] JOB_FAILED', { message: err?.message, stack: err?.stack });
         throw new AiServiceError({
           message: 'انٹرنیٹ رابطہ مستقل منقطع رہا۔ برائے مہربانی نیٹ ورک چیک کر کے دوبارہ کوشش فرمائیں۔',
           statusCode: 0,
@@ -298,6 +320,7 @@ export async function pollBookJobUntilComplete(
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 
+  console.error('[PREVIEW] JOB_FAILED', { jobId, reason: 'JOB_TIMEOUT' });
   throw new AiServiceError({
     message: 'کتاب کی تیاری مقررہ وقت (Timeout) میں مکمل نہیں ہو سکی۔ براہِ کرم دوبارہ کوشش فرمائیں۔',
     statusCode: 504,

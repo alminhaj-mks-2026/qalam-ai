@@ -1,0 +1,98 @@
+{
+  "jobId": "job_525be1c545_1791464887620",
+  "contentHash": "525be1c545ca05d67dfbff5907d3152f9fa32b3a7e2739dbc28882a792ded2d8",
+  "createdAt": 1791464887620,
+  "updatedAt": 1791464903259,
+  "status": "completed",
+  "currentStage": "completed",
+  "currentChapterIndex": 1,
+  "totalChapters": 1,
+  "progressPercent": 100,
+  "message": "کتاب کامیابی سے تیار ہو گئی ہے!",
+  "modelUsed": "gemini-3.8-flash",
+  "attempts": 1,
+  "params": {
+    "content": "مطالعہ صرف معلومات کا نام نہیں، بلکہ یہ انسان کی سوچ کو نئی زندگی عطا کرتا ہے۔",
+    "authorName": "عبد الحفیظ",
+    "genre": "general",
+    "language": "ur"
+  },
+  "completedChapters": {
+    "chap-1": {
+      "id": "chap-1",
+      "title": "مطالعہ، وسعتِ فکر اور عملی رہنمائی",
+      "summary": "",
+      "subheadings": [
+        "مطالعہ، وسعتِ فکر اور عملی رہنمائی"
+      ],
+      "sections": [
+        {
+          "heading": "مطالعہ، وسعتِ فکر اور عملی رہنمائی",
+          "content": "مطالعہ صرف معلومات کا نام نہیں، بلکہ یہ انسان کی سوچ کو نئی زندگی عطا کرتا ہے۔"
+        }
+      ],
+      "completedAt": 1791464903258,
+      "modelUsed": "gemini-3.8-flash"
+    }
+  },
+  "isProcessing": false,
+  "lastAttemptAt": 1791464887631,
+  "error": null,
+  "quotaErrorInfo": null,
+  "outline": {
+    "title": "کتابی مجموعہ",
+    "subtitle": "",
+    "authorName": "عبد الحفیظ",
+    "language": "ur",
+    "introduction": "",
+    "conclusion": "",
+    "chapters": [
+      {
+        "id": "chap-1",
+        "title": "باب 1: مطالعہ، وسعتِ فکر اور عملی رہنمائی",
+        "summary": "",
+        "sections": [
+          {
+            "heading": "مطالعہ، وسعتِ فکر اور عملی رہنمائی",
+            "briefDescription": "اس حصے کی تفصیلی وضاحت اور علمی مواد"
+          }
+        ]
+      }
+    ]
+  },
+  "assembledBook": {
+    "title": "کتابی مجموعہ",
+    "subtitle": "ایک منظم اور مفصل مطالعہ",
+    "authorName": "عبد الحفیظ",
+    "language": "ur",
+    "introduction": "",
+    "conclusion": "",
+    "chapters": [
+      {
+        "id": "chap-1",
+        "title": "مطالعہ، وسعتِ فکر اور عملی رہنمائی",
+        "summary": "",
+        "subheadings": [
+          "مطالعہ، وسعتِ فکر اور عملی رہنمائی"
+        ],
+        "sections": [
+          {
+            "heading": "مطالعہ، وسعتِ فکر اور عملی رہنمائی",
+            "content": "مطالعہ صرف معلومات کا نام نہیں، بلکہ یہ انسان کی سوچ کو نئی زندگی عطا کرتا ہے۔"
+          }
+        ],
+        "completedAt": 1791464903258,
+        "modelUsed": "gemini-3.8-flash"
+      }
+    ],
+    "tableOfContents": [
+      {
+        "title": "مطالعہ، وسعتِ فکر اور عملی رہنمائی",
+        "sections": [
+          "مطالعہ، وسعتِ فکر اور عملی رہنمائی"
+        ]
+      }
+    ],
+    "generatedAt": "2026-10-08T13:08:23.259Z"
+  }
+}

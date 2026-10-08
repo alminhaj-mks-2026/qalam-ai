@@ -69,36 +69,44 @@ export function tokenizeScript(text: string): ScriptToken[] {
 
   const tokens: ScriptToken[] = [];
 
-  // Match English words/phrases OR Arabic quotes/verses with diacritics
-  const regex = /([A-Za-z][A-Za-z0-9\s,.'"-]*[A-Za-z0-9]|[A-Za-z]+)|([«"][^»"]*[\u064B-\u065F\u0670][^»"]*[»"])|(\b[\u0621-\u064A\u0670]*[\u064B-\u065F\u0670][\u0621-\u064A\u0670\u064B-\u065F\u0670\s]+\b)/gu;
+  try {
+    // Match English words/phrases OR Arabic quotes/verses with diacritics
+    const regex = /([A-Za-z][A-Za-z0-9\s,.'"-]*[A-Za-z0-9]|[A-Za-z]+)|([«"][^»"]*[\u064B-\u065F\u0670][^»"]*[»"])|(\b[\u0621-\u064A\u0670]*[\u064B-\u065F\u0670][\u0621-\u064A\u0670\u064B-\u065F\u0670\s]+\b)/gu;
 
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
 
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      const urduChunk = text.slice(lastIndex, match.index);
-      if (urduChunk) {
-        tokens.push({ type: 'urdu', text: urduChunk });
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        const urduChunk = text.slice(lastIndex, match.index);
+        if (urduChunk) {
+          tokens.push({ type: 'urdu', text: urduChunk });
+        }
+      }
+
+      if (match[1]) {
+        tokens.push({ type: 'english', text: match[1] });
+      } else if (match[2]) {
+        tokens.push({ type: 'arabic', text: match[2] });
+      } else if (match[3]) {
+        tokens.push({ type: 'arabic', text: match[3] });
+      }
+
+      if (regex.lastIndex === lastIndex) {
+        regex.lastIndex++;
+      }
+      lastIndex = regex.lastIndex;
+    }
+
+    if (lastIndex < text.length) {
+      const trailingChunk = text.slice(lastIndex);
+      if (trailingChunk) {
+        tokens.push({ type: 'urdu', text: trailingChunk });
       }
     }
-
-    if (match[1]) {
-      tokens.push({ type: 'english', text: match[1] });
-    } else if (match[2]) {
-      tokens.push({ type: 'arabic', text: match[2] });
-    } else if (match[3]) {
-      tokens.push({ type: 'arabic', text: match[3] });
-    }
-
-    lastIndex = regex.lastIndex;
-  }
-
-  if (lastIndex < text.length) {
-    const trailingChunk = text.slice(lastIndex);
-    if (trailingChunk) {
-      tokens.push({ type: 'urdu', text: trailingChunk });
-    }
+  } catch (e) {
+    console.warn('[tokenizeScript] Fallback to raw text note:', e);
+    return [{ type: 'urdu', text }];
   }
 
   return tokens.length > 0 ? tokens : [{ type: 'urdu', text }];
