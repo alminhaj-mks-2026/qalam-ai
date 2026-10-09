@@ -28,7 +28,16 @@ async function getApp() {
     appInitPromise = (async () => {
       try {
         console.log('[DIAGNOSTIC] SERVER_IMPORT_START');
-        const serverModule: any = await import('../server');
+        let serverModule: any;
+        try {
+          serverModule = await import('../server');
+        } catch (e1: any) {
+          try {
+            serverModule = await import('../server.js');
+          } catch (e2: any) {
+            serverModule = await import('../server.ts');
+          }
+        }
         const loadedApp = serverModule.default || serverModule.app || serverModule;
         console.log('[DIAGNOSTIC] SERVER_IMPORT_SUCCESS');
         console.log('[DIAGNOSTIC] APP_INITIALIZED');
@@ -53,8 +62,52 @@ getApp().catch((err: any) => {
   // Error already logged and stored in appInitError
 });
 
-export default async function handler(req: any, res: any) {
+export async function handler(req: any, res: any) {
   const reqStart = Date.now();
+  const rawUrl = req.url || '';
+  const cleanUrl = rawUrl.split('?')[0];
+
+  // Direct Diagnostic Endpoint: validates Vercel serverless startup, module load & exports without invoking Gemini or PDF engines
+  if (cleanUrl === '/api/diagnostic' || cleanUrl === '/api/health' || cleanUrl === '/api/ping') {
+    let importStatus = 'PENDING';
+    let importErrorDetails: any = null;
+    try {
+      await getApp();
+      importStatus = 'SUCCESS';
+    } catch (e: any) {
+      importStatus = 'FAILED';
+      importErrorDetails = {
+        message: e?.message || String(e),
+        stack: e?.stack || 'N/A',
+      };
+    }
+
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'application/json');
+      res.statusCode = 200;
+      res.end(
+        JSON.stringify(
+          {
+            status: 'ok',
+            handlerType: typeof handler,
+            serverImportStatus: importStatus,
+            serverImportError: importErrorDetails,
+            environment: {
+              isVercel: !!(process.env.VERCEL || process.env.VERCEL_ENV),
+              vercelEnv: process.env.VERCEL_ENV || 'N/A',
+              nodeVersion: process.version,
+              hasGeminiApiKey: !!process.env.GEMINI_API_KEY,
+            },
+            timestamp: new Date().toISOString(),
+          },
+          null,
+          2
+        )
+      );
+    }
+    return;
+  }
+
   console.log(`[DIAGNOSTIC] REQUEST_RECEIVED: ${req.method} ${req.url} (originalUrl: ${req.originalUrl || 'N/A'})`);
 
   let app: any;
@@ -138,3 +191,19 @@ export default async function handler(req: any, res: any) {
     }
   });
 }
+
+// Universal Handler Shape Guarantee for Vercel Serverless Function & AWS Lambda runtimes
+(handler as any).default = handler;
+(handler as any).handler = handler;
+(handler as any).app = handler;
+
+const globalModule = typeof module !== 'undefined' ? module : (globalThis as any).module;
+if (globalModule && globalModule.exports) {
+  globalModule.exports = handler;
+  (globalModule.exports as any).default = handler;
+  (globalModule.exports as any).handler = handler;
+  (globalModule.exports as any).app = handler;
+}
+
+export { handler as app };
+export default handler;

@@ -972,7 +972,14 @@ function loadJobState(jobId: string): BookJobState | null {
 }
 
 // Periodic TTL cleanup: jobs in memory older than 2 hours are pruned from RAM (remain on disk)
-if (!process.env.VERCEL && !(global as any)._activeJobsCleanupInterval) {
+const isServerlessEnv = !!(
+  process.env.VERCEL ||
+  process.env.VERCEL_ENV ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  process.env.LAMBDA_TASK_ROOT
+);
+
+if (!isServerlessEnv && !(global as any)._activeJobsCleanupInterval) {
   (global as any)._activeJobsCleanupInterval = setInterval(() => {
     const now = Date.now();
     for (const [jobId, job] of activeJobs.entries()) {
@@ -1857,7 +1864,7 @@ Always provide authentic, well-structured, clear, and dignified responses.`;
 
 // Vite Integration for dev server / Express static for production
 async function startServer() {
-  if (process.env.VERCEL) {
+  if (isServerlessEnv) {
     return;
   }
 
@@ -1893,10 +1900,17 @@ app.use((err: any, req: any, res: any, next: any) => {
   }
 });
 
-if (!process.env.VERCEL) {
+// Standalone execution guard: ONLY start HTTP listener when run directly via CLI, NEVER when imported into serverless
+const isMainScript = typeof process !== 'undefined' && Boolean(
+  (process.argv[1] && (process.argv[1].endsWith('server.ts') || process.argv[1].endsWith('server.js'))) ||
+  process.env.RUN_STANDALONE_SERVER === 'true'
+);
+
+if (!isServerlessEnv && isMainScript) {
   startServer().catch((err) => {
     console.error('Failed to start server:', err);
   });
 }
 
+export { app };
 export default app;
