@@ -29,16 +29,30 @@ async function getApp() {
       try {
         console.log('[DIAGNOSTIC] SERVER_IMPORT_START');
         let serverModule: any;
+        const importErrors: any[] = [];
         try {
           serverModule = await import('../dist/server.js');
+          console.log('[DIAGNOSTIC] SUCCESS: Imported ../dist/server.js');
         } catch (e1: any) {
+          importErrors.push({ path: '../dist/server.js', error: e1.message });
           try {
             serverModule = await import('../server');
+            console.log('[DIAGNOSTIC] SUCCESS: Imported ../server');
           } catch (e2: any) {
+            importErrors.push({ path: '../server', error: e2.message });
             try {
               serverModule = await import('../server.js');
+              console.log('[DIAGNOSTIC] SUCCESS: Imported ../server.js');
             } catch (e3: any) {
-              serverModule = await import('../server.ts');
+              importErrors.push({ path: '../server.js', error: e3.message });
+              try {
+                serverModule = await import('../server.ts');
+                console.log('[DIAGNOSTIC] SUCCESS: Imported ../server.ts');
+              } catch (e4: any) {
+                importErrors.push({ path: '../server.ts', error: e4.message });
+                console.error('[DIAGNOSTIC] ALL IMPORT ATTEMPTS FAILED:', importErrors);
+                throw new Error(`Failed to load server module. Errors: ${JSON.stringify(importErrors)}`);
+              }
             }
           }
         }
