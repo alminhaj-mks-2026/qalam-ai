@@ -30,12 +30,16 @@ async function getApp() {
         console.log('[DIAGNOSTIC] SERVER_IMPORT_START');
         let serverModule: any;
         try {
-          serverModule = await import('../server');
+          serverModule = await import('../dist/server.js');
         } catch (e1: any) {
           try {
-            serverModule = await import('../server.js');
+            serverModule = await import('../server');
           } catch (e2: any) {
-            serverModule = await import('../server.ts');
+            try {
+              serverModule = await import('../server.js');
+            } catch (e3: any) {
+              serverModule = await import('../server.ts');
+            }
           }
         }
         const loadedApp = serverModule.default || serverModule.app || serverModule;
