@@ -518,6 +518,44 @@ export async function createBookPdfBlob(
       overflow-wrap: break-word;
     }
 
+    .embedded-illustration {
+      margin: 16px 0;
+      text-align: center;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    .embedded-illustration img {
+      max-width: 95%;
+      height: auto;
+      border-radius: 6px;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      display: inline-block;
+    }
+
+    table {
+      width: 100%;
+      margin: 14px 0;
+      border-collapse: collapse;
+      direction: rtl;
+      font-size: ${Math.max(12, bodyFontSize - 2)}px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    table th, table td {
+      border: 1px solid #94a3b8;
+      padding: 6px 10px;
+      text-align: right;
+    }
+
+    table th {
+      background-color: #f1f5f9;
+      font-weight: bold;
+      color: #0f172a;
+    }
+
     .body-p {
       text-indent: 1.6em;
       margin-top: 0;

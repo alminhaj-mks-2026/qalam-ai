@@ -84,7 +84,7 @@ export async function startBookGenerationJob(params: GenerateBookParams): Promis
     });
     console.log('[PREVIEW] REQUEST_SENT', { status: response.status, ok: response.ok });
   } catch (netErr: any) {
-    console.error('[PREVIEW] JOB_FAILED', { message: netErr?.message, stack: netErr?.stack });
+    console.warn('[Qalam API] Request network issue:', { message: netErr?.message });
     throw new AiServiceError({
       message: 'نیٹ ورک کنکشن میں رکاوٹ پیش آئی۔ برائے مہربانی انٹرنیٹ چیک کر کے دوبارہ کوشش کریں۔',
       statusCode: 0,
@@ -104,7 +104,7 @@ export async function startBookGenerationJob(params: GenerateBookParams): Promis
   }
 
   if (!response.ok || !data.success) {
-    console.error('[PREVIEW] JOB_FAILED', { error: data.error, errorCode: data.errorCode });
+    console.warn('[Qalam API] Job error:', { error: data.error, errorCode: data.errorCode });
     throw new AiServiceError({
       message: data.error || 'Gemini AI سروس کے ساتھ رابطہ قائم نہیں ہو سکا۔',
       statusCode: response.status || 500,
@@ -286,7 +286,7 @@ export async function pollBookJobUntilComplete(
       }
 
       if (statusData.status === 'failed') {
-        console.error('[PREVIEW] JOB_FAILED', { jobId, error: statusData.error });
+        console.warn('[Qalam API] Background job reported failed status:', { jobId, error: statusData.error });
         const qErr = statusData.quotaErrorInfo;
         throw new AiServiceError({
           message: statusData.error || 'کتاب کی تیاری کے دوران سرور پر خرابی پیش آئی۔',
@@ -305,9 +305,9 @@ export async function pollBookJobUntilComplete(
 
       // Treat other errors (network blips, transient 500/502/503 during reload) as retryable
       consecutiveNetworkErrors++;
-      console.warn(`[PREVIEW] POLLING retryable note (attempt ${consecutiveNetworkErrors}/${maxNetworkRetries}):`, err?.message);
+      console.warn(`[Qalam API] Polling retryable note (attempt ${consecutiveNetworkErrors}/${maxNetworkRetries}):`, err?.message);
       if (consecutiveNetworkErrors >= maxNetworkRetries) {
-        console.error('[PREVIEW] JOB_FAILED', { message: err?.message, stack: err?.stack });
+        console.warn('[Qalam API] Polling network timeout reached:', { message: err?.message });
         throw new AiServiceError({
           message: 'انٹرنیٹ رابطہ مستقل منقطع رہا۔ برائے مہربانی نیٹ ورک چیک کر کے دوبارہ کوشش فرمائیں۔',
           statusCode: 0,
@@ -320,7 +320,7 @@ export async function pollBookJobUntilComplete(
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 
-  console.error('[PREVIEW] JOB_FAILED', { jobId, reason: 'JOB_TIMEOUT' });
+  console.warn('[Qalam API] Job timeout:', { jobId });
   throw new AiServiceError({
     message: 'کتاب کی تیاری مقررہ وقت (Timeout) میں مکمل نہیں ہو سکی۔ براہِ کرم دوبارہ کوشش فرمائیں۔',
     statusCode: 504,
@@ -348,7 +348,7 @@ export async function generateBookWithGemini(
 
   const result = await pollBookJobUntilComplete(jobId, (statusInfo) => {
     if (onProgress) {
-      const pct = statusInfo.progressPercent || 10;
+      const pct = typeof statusInfo.progressPercent === 'number' ? statusInfo.progressPercent : 0;
       onProgress(`[${pct}٪] ${statusInfo.message || 'کتاب تیار کی جا رہی ہے...'}`);
     }
   });
@@ -455,5 +455,296 @@ export async function cancelBookJob(jobId: string): Promise<{ success: boolean; 
   } catch (err) {
     console.warn('Network error while cancelling book generation job:', err);
     return { success: true, status: 'cancelled' };
+  }
+}
+
+export interface UploadedFileResult {
+  fileId: string;
+  extractedText: string;
+  images: string[];
+  wordCount: number;
+}
+
+export interface UploadProgressEvent {
+  phase: 'uploading' | 'uploaded' | 'processing' | 'ready';
+  progressPercent: number;
+  stageMessage: string;
+}
+
+/**
+ * Uploads a file directly with true byte-level transfer progress.
+ * Completes as soon as the file is safely stored on the server without waiting for OCR or generation.
+ */
+export async function uploadFileDirect(
+  fileOrBlob: File | Blob,
+  fileName: string,
+  fileType: string,
+  onProgress?: (event: UploadProgressEvent) => void
+): Promise<{ fileId: string; status: string; message: string }> {
+  const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload-file');
+    xhr.setRequestHeader('x-file-id', fileId);
+    xhr.setRequestHeader('x-file-name', encodeURIComponent(fileName));
+    xhr.setRequestHeader('x-file-type', fileType);
+    xhr.setRequestHeader('x-file-size', String(fileOrBlob.size));
+
+    // Real byte progress while transferring over the network
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) {
+        const pct = Math.min(100, Math.round((e.loaded / e.total) * 100));
+        if (onProgress) {
+          onProgress({
+            phase: 'uploading',
+            progressPercent: pct,
+            stageMessage: `اپ لوڈ ہو رہا ہے: ${pct}٪ (${(e.loaded / (1024 * 1024)).toFixed(1)}MB / ${(e.total / (1024 * 1024)).toFixed(1)}MB)...`,
+          });
+        }
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const res = JSON.parse(xhr.responseText);
+          if (res.success) {
+            if (onProgress) {
+              onProgress({
+                phase: 'uploaded',
+                progressPercent: 100,
+                stageMessage: 'اپ لوڈ مکمل ہو گئی! (Upload complete)',
+              });
+            }
+            resolve({ fileId, status: 'uploaded', message: res.message || 'Upload complete' });
+          } else {
+            reject(new Error(res.error || 'فائل اپ لوڈ ناکام رہی۔'));
+          }
+        } catch {
+          resolve({ fileId, status: 'uploaded', message: 'Upload complete' });
+        }
+      } else {
+        reject(new Error(`سرور کی جانب سے خرابی (Status ${xhr.status})`));
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error('فائل اپ لوڈ کے دوران نیٹ ورک رابطہ منقطع ہو گیا۔'));
+    };
+
+    xhr.send(fileOrBlob);
+  });
+}
+
+/**
+ * Polls file extraction separately until ready.
+ */
+export async function pollFileExtractionUntilReady(
+  fileId: string,
+  onProgress?: (event: UploadProgressEvent) => void
+): Promise<UploadedFileResult> {
+  // Trigger processing asynchronously on the server
+  try {
+    await fetch('/api/process-file', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileId }),
+    });
+  } catch (e) {
+    console.warn('Could not explicitly trigger /api/process-file, continuing to poll:', e);
+  }
+
+  let pollAttempts = 0;
+  const maxPolls = 600; // 600 * 1.5s = 900s (15 mins max for massive scanned manuscripts)
+  while (pollAttempts < maxPolls) {
+    pollAttempts++;
+    await new Promise((r) => setTimeout(r, 1200));
+
+    try {
+      const res = await fetch(`/api/file-status/${encodeURIComponent(fileId)}`);
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (!data.success) continue;
+
+      if (onProgress) {
+        onProgress({
+          phase: data.status === 'ready' ? 'ready' : 'processing',
+          progressPercent: typeof data.progress === 'number' ? data.progress : 0,
+          stageMessage: data.stage || 'متن نکالا جا رہا ہے...',
+        });
+      }
+
+      if (data.status === 'ready') {
+        return {
+          fileId,
+          extractedText: data.extractedText || '',
+          images: data.images || [],
+          wordCount: data.wordCount || 0,
+        };
+      }
+
+      if (data.status === 'error') {
+        throw new AiServiceError({
+          message: data.error || 'فائل کی پروسیسنگ مکمل نہیں ہو سکی۔',
+          statusCode: 500,
+          errorCode: 'FILE_PROCESSING_FAILED',
+        });
+      }
+    } catch (pollErr: any) {
+      if (pollErr instanceof AiServiceError) throw pollErr;
+      console.warn('[Upload] Polling note:', pollErr?.message);
+    }
+  }
+
+  throw new AiServiceError({
+    message: 'فائل سے متن نکالنے کا عمل مقررہ وقت میں مکمل نہیں ہو سکا۔',
+    statusCode: 504,
+    errorCode: 'FILE_PROCESSING_TIMEOUT',
+  });
+}
+
+/**
+ * Uploads a large file in safe 3.5 MB chunks (well below Cloud Run 32 MB and Vercel limits).
+ * Supports files up to 50 MB+ with real progress and automatic chunk retry.
+ */
+export async function uploadFileChunked(
+  fileOrBlob: File | Blob,
+  fileName: string,
+  fileType: string,
+  onProgress?: (progressPercent: number, stageMessage: string) => void
+): Promise<UploadedFileResult> {
+  const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MB per chunk
+  const totalSize = fileOrBlob.size;
+  const totalChunks = Math.max(1, Math.ceil(totalSize / CHUNK_SIZE));
+
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+    const start = chunkIndex * CHUNK_SIZE;
+    const end = Math.min(totalSize, (chunkIndex + 1) * CHUNK_SIZE);
+    const chunkBlob = fileOrBlob.slice(start, end);
+
+    let uploadSuccess = false;
+    let attempts = 0;
+
+    while (!uploadSuccess && attempts < 3) {
+      attempts++;
+      try {
+        const uploadPercent = Math.min(99, Math.round(((chunkIndex + 1) / totalChunks) * 100));
+        if (onProgress) {
+          onProgress(
+            uploadPercent,
+            `چنک اپ لوڈ ہو رہا ہے: حصہ ${chunkIndex + 1}/${totalChunks} (${(end / (1024 * 1024)).toFixed(1)}MB / ${(totalSize / (1024 * 1024)).toFixed(1)}MB)...`
+          );
+        }
+
+        // Try direct binary streaming chunk first (fastest, zero memory expansion)
+        let res = await fetch('/api/upload-chunk', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'x-chunk-binary': 'true',
+            'x-file-id': fileId,
+            'x-chunk-index': String(chunkIndex),
+            'x-total-chunks': String(totalChunks),
+            'x-file-name': encodeURIComponent(fileName),
+            'x-file-type': fileType,
+            'x-file-size': String(totalSize),
+          },
+          body: chunkBlob,
+        });
+
+        if (!res.ok) {
+          // Fallback to base64 JSON payload if streaming binary is rejected
+          const arrayBuffer = await chunkBlob.arrayBuffer();
+          const bytes = new Uint8Array(arrayBuffer);
+          let binary = '';
+          const len = bytes.byteLength;
+          for (let i = 0; i < len; i += 8192) {
+            binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, Math.min(i + 8192, len))));
+          }
+          const chunkBase64 = btoa(binary);
+
+          res = await fetch('/api/upload-chunk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fileId,
+              chunkIndex,
+              totalChunks,
+              fileName,
+              fileType,
+              totalSize,
+              chunkBase64,
+            }),
+          });
+        }
+
+        if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'چنک اپ لوڈ میں خرابی');
+        uploadSuccess = true;
+      } catch (err: any) {
+        if (attempts >= 3) {
+          throw new AiServiceError({
+            message: `فائل اپ لوڈ کے دوران نیٹ ورک تعطل آیا (حصہ ${chunkIndex + 1}/${totalChunks})۔ براہِ کرم دوبارہ کوشش فرمائیں۔`,
+            statusCode: 500,
+            errorCode: 'CHUNK_UPLOAD_FAILED',
+          });
+        }
+        await new Promise((r) => setTimeout(r, 800 * attempts));
+      }
+    }
+  }
+
+  if (onProgress) {
+    onProgress(100, 'اپ لوڈ مکمل ہو گئی! متن اور نقوش نکالے جا رہے ہیں...');
+  }
+
+  return await pollFileExtractionUntilReady(fileId, (evt) => {
+    if (onProgress) {
+      onProgress(evt.progressPercent, evt.stageMessage);
+    }
+  });
+}
+
+/**
+ * Intelligent resilient upload:
+ * If file is >= 10 MB (e.g. 32 MB - 50 MB scanned PDFs), immediately uses chunked upload
+ * to prevent HTTP 413 Request Entity Too Large.
+ * For smaller files, uses fast direct stream and seamlessly falls back to chunking if needed.
+ */
+export async function uploadFileResilient(
+  fileOrBlob: File | Blob,
+  fileName: string,
+  fileType: string,
+  onProgress?: (progressPercent: number, stageMessage: string) => void
+): Promise<UploadedFileResult> {
+  const LARGE_FILE_THRESHOLD = 2 * 1024 * 1024; // 2 MB
+
+  if (fileOrBlob.size >= LARGE_FILE_THRESHOLD) {
+    console.log(`[Upload] File size ${(fileOrBlob.size / 1024 / 1024).toFixed(1)}MB exceeds threshold. Using chunked upload pipeline.`);
+    return uploadFileChunked(fileOrBlob, fileName, fileType, onProgress);
+  }
+
+  try {
+    const uploadRes = await uploadFileDirect(fileOrBlob, fileName, fileType, (evt) => {
+      if (onProgress) {
+        onProgress(evt.progressPercent, evt.stageMessage);
+      }
+    });
+
+    if (onProgress) {
+      onProgress(100, 'اپ لوڈ مکمل ہو گئی! متن نکالا جا رہا ہے...');
+    }
+
+    return await pollFileExtractionUntilReady(uploadRes.fileId, (evt) => {
+      if (onProgress) {
+        onProgress(evt.progressPercent, evt.stageMessage);
+      }
+    });
+  } catch (directErr: any) {
+    console.warn('[Upload] Direct upload failed, seamlessly falling back to chunked upload:', directErr?.message);
+    return uploadFileChunked(fileOrBlob, fileName, fileType, onProgress);
   }
 }

@@ -107,8 +107,21 @@ export default function App() {
     },
   ]);
 
-  // Full Screen Book View Modal State
-  const [isFullBookViewOpen, setIsFullBookViewOpen] = useState<boolean>(false);
+  // Full Screen Book View Modal State - persisted and stable across re-renders, uploads and errors
+  const [isFullBookViewOpen, setIsFullBookViewOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('qalam_full_book_view_open') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const setFullBookViewOpenSafe = (open: boolean) => {
+    setIsFullBookViewOpen(open);
+    try {
+      localStorage.setItem('qalam_full_book_view_open', open ? 'true' : 'false');
+    } catch {}
+  };
   const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
 
   // Real Gemini AI Generation States
@@ -324,6 +337,15 @@ export default function App() {
     isGeneratingRef.current = true;
     setIsGeneratingBook(true);
 
+    // Check if any attached file is still uploading or processing
+    const pendingFiles = attachedFiles.filter((f) => f.status === 'uploading' || f.status === 'processing');
+    if (pendingFiles.length > 0) {
+      setGenerationError(`براہِ کرم فائل "${pendingFiles[0].name}" کا متن نکلنے تک چند لمحے انتظار فرمائیں...`);
+      isGeneratingRef.current = false;
+      setIsGeneratingBook(false);
+      return;
+    }
+
     let combinedContent = rawText.trim();
 
     // Include text from attached files if present
@@ -411,7 +433,7 @@ export default function App() {
       } catch (e) {}
 
       // Automatically launch Full Screen Premium Book View on success
-      setIsFullBookViewOpen(true);
+      setFullBookViewOpenSafe(true);
     } catch (err: any) {
       if (err?.errorCode === 'JOB_CANCELLED') {
         console.log('[handleGenerateBook] Generation was cancelled by user.');
@@ -443,8 +465,7 @@ export default function App() {
       });
 
       setGenerationError(err.message || 'کتاب کی تیاری کے دوران خرابی پیش آئی۔');
-      // CRITICAL: NEVER automatically open modal on error! Keep current view steady on workspace.
-      setIsFullBookViewOpen(false);
+      // Keep Preview open and stable during API errors; do not close or force view reset
     } finally {
       setIsGeneratingBook(false);
       isGeneratingRef.current = false;
@@ -634,7 +655,7 @@ export default function App() {
           {/* Prominent Primary Action Button */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
             <button
-              onClick={() => setIsFullBookViewOpen(true)}
+              onClick={() => setFullBookViewOpenSafe(true)}
               className="w-full sm:w-auto inline-flex items-center justify-center gap-3 px-8 py-4 bg-[#D4AF37] hover:bg-[#c49f2e] text-[#0F172A] font-bold font-urdu text-base sm:text-lg rounded-xl shadow-lg transition-all transform active:scale-95 cursor-pointer"
             >
               <BookOpen className="w-6 h-6" />
@@ -708,7 +729,7 @@ export default function App() {
           setChapters={setChapters}
           onDoneEditing={() => {
             setIsEditorOpen(false);
-            setIsFullBookViewOpen(true);
+            setFullBookViewOpenSafe(true);
           }}
           prefaceStyles={prefaceStyles}
           setPrefaceStyles={setPrefaceStyles}
@@ -761,7 +782,7 @@ export default function App() {
           prefaceImage={prefaceImage}
           conclusionImage={conclusionImage}
           isOpenModal={true}
-          onCloseModal={() => setIsFullBookViewOpen(false)}
+          onCloseModal={() => setFullBookViewOpenSafe(false)}
           generationError={generationError}
           quotaErrorInfo={quotaErrorInfo}
           isGeneratingBook={isGeneratingBook}

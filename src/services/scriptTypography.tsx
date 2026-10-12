@@ -129,6 +129,9 @@ export function formatScriptAwareHtml(contentStr: string): string {
     .map((para) => {
       const hasHtml = /<[a-z][\s\S]*>/i.test(para);
       if (hasHtml) {
+        if (para.trim().startsWith('<div') || para.trim().startsWith('<table') || para.trim().startsWith('<img')) {
+          return para;
+        }
         return `<p class="body-p urdu-para font-urdu" dir="rtl">${para}</p>`;
       }
 
@@ -182,6 +185,16 @@ export function renderScriptAwareReactParagraphs(
       {paragraphs.map((para, pIdx) => {
         const hasHtml = /<[a-z][\s\S]*>/i.test(para);
         if (hasHtml) {
+          if (para.trim().startsWith('<div') || para.trim().startsWith('<table') || para.trim().startsWith('<img')) {
+            return (
+              <div
+                key={pIdx}
+                dir="rtl"
+                className="my-3 overflow-x-auto"
+                dangerouslySetInnerHTML={{ __html: para }}
+              />
+            );
+          }
           return (
             <p
               key={pIdx}

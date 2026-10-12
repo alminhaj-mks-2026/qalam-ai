@@ -148,6 +148,32 @@ export function proofreadUrduAndArabic(text: string): string {
 /**
  * Stage 1 & 2: Strips chat metadata, timestamps, sender names, page markers, emojis, and repeated signatures
  */
+/**
+ * Protects embedded illustrations, diagrams, talismans, numerical squares, and tables
+ * during textual cleaning and formatting passes so their markup and image data are 100% preserved.
+ */
+export function protectHtmlBlocks(text: string): { text: string; restore: (t: string) => string } {
+  if (!text || typeof text !== 'string') {
+    return { text: '', restore: (t) => t };
+  }
+  const blocks: string[] = [];
+  const protectedText = text.replace(/(<div class="embedded-illustration"[\s\S]*?<\/div>|<table[\s\S]*?<\/table>|<img\s+[^>]*>)/gi, (match) => {
+    const idx = blocks.length;
+    blocks.push(match);
+    return `\n__QALAM_HTML_BLOCK_${idx}__\n`;
+  });
+  return {
+    text: protectedText,
+    restore: (t: string) => {
+      let res = t;
+      blocks.forEach((blk, idx) => {
+        res = res.replace(new RegExp(`__QALAM_HTML_BLOCK_${idx}__`, 'g'), blk);
+      });
+      return res;
+    },
+  };
+}
+
 export function cleanRawManuscript(rawText: string): CleanedManuscriptResult {
   if (!rawText || typeof rawText !== 'string') {
     return {
@@ -163,6 +189,10 @@ export function cleanRawManuscript(rawText: string): CleanedManuscriptResult {
   let text = rawText;
   let removedCount = 0;
   let isChat = false;
+
+  // Protect embedded diagrams, illustrations, tables, and talismans
+  const htmlProtection = protectHtmlBlocks(text);
+  text = htmlProtection.text;
 
   // 1. Normalize line endings and strip invisible zero-width/bidirectional control characters
   text = text
@@ -295,7 +325,7 @@ export function cleanRawManuscript(rawText: string): CleanedManuscriptResult {
   const formattedText = formatBookParagraphs(punctuatedLines.join('\n'));
 
   // Final check to remove any remaining "دل کی آواز"
-  const thoroughlyCleaned = removeDilKiAwazSignatures(formattedText);
+  const thoroughlyCleaned = htmlProtection.restore(removeDilKiAwazSignatures(formattedText));
 
   const cleanedLength = thoroughlyCleaned.length;
 
@@ -319,6 +349,12 @@ export function repairFragmentsAndDuplicates(lines: string[]): string[] {
     let line = lines[i].trim();
 
     if (!line) continue;
+
+    // Always preserve protected HTML/illustration tokens
+    if (line.includes('__QALAM_HTML_BLOCK_')) {
+      filtered.push(line);
+      continue;
+    }
 
     // Skip pure stray punctuation/bullet lines
     if (/^[•\-\*\.،۔_=+~:;#/\\|]{1,6}$/.test(line)) {
@@ -357,6 +393,10 @@ export function repairFragmentsAndDuplicates(lines: string[]): string[] {
  */
 export function applyProfessionalPunctuation(text: string, language: string = 'ur'): string {
   if (!text || typeof text !== 'string') return '';
+
+  if (text.includes('__QALAM_HTML_BLOCK_') || /<[a-z][\s\S]*>/i.test(text)) {
+    return text;
+  }
 
   let str = text.trim();
 
@@ -426,6 +466,11 @@ export function formatBookParagraphs(content: string): string {
   const formattedParas: string[] = [];
 
   for (let para of rawParagraphs) {
+    if (para.includes('__QALAM_HTML_BLOCK_') || /<[a-z][\s\S]*>/i.test(para)) {
+      formattedParas.push(para);
+      continue;
+    }
+
     if (para.length < 30 && formattedParas.length > 0 && !para.endsWith(':')) {
       const prev = formattedParas[formattedParas.length - 1];
       if (!prev.endsWith(':')) {
@@ -825,7 +870,8 @@ export function partitionManuscriptThematically(
 export function cleanFinalBookContent(content: string, language: string = 'ur'): string {
   if (!content || typeof content !== 'string') return '';
 
-  let text = content;
+  const htmlProtection = protectHtmlBlocks(content);
+  let text = htmlProtection.text;
 
   // 1. Remove repeated signatures "دل کی آواز"
   text = removeDilKiAwazSignatures(text);
@@ -855,6 +901,6 @@ export function cleanFinalBookContent(content: string, language: string = 'ur'):
   // 8. Re-apply signature cleaner to be 100% certain
   text = removeDilKiAwazSignatures(text);
 
-  return text;
+  return htmlProtection.restore(text);
 }
 

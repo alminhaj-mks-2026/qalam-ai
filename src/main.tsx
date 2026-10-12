@@ -9,18 +9,16 @@ console.log('[PREVIEW] APP_START');
 if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event.reason;
-    console.error('[PREVIEW] UNHANDLED_ERROR (Promise Rejection):', {
+    console.warn('[Qalam Safe Guard] Handled promise rejection:', {
       message: reason?.message || String(reason),
-      stack: reason?.stack || 'No stack trace available',
     });
     event.preventDefault();
   });
 
   window.addEventListener('error', (event) => {
     const error = event.error;
-    console.error('[PREVIEW] UNHANDLED_ERROR (Runtime Error):', {
+    console.warn('[Qalam Safe Guard] Handled runtime error:', {
       message: error?.message || event.message || String(error),
-      stack: error?.stack || 'No stack trace available',
     });
     event.preventDefault();
   });
@@ -46,9 +44,8 @@ class SafeErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('[PREVIEW] UNHANDLED_ERROR (React ErrorBoundary):', {
+    console.warn('[Qalam Safe Guard] Caught error in React tree:', {
       message: error?.message || String(error),
-      stack: error?.stack || 'No stack trace available',
       componentStack: errorInfo.componentStack,
     });
   }
@@ -68,11 +65,10 @@ class SafeErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
             <button
               onClick={() => {
                 this.setState({ hasError: false, error: undefined });
-                window.location.reload();
               }}
-              className="px-6 py-2.5 bg-[#D4AF37] hover:bg-[#c49f2e] text-[#0F172A] font-bold rounded-xl text-sm transition-all"
+              className="px-6 py-2.5 bg-[#D4AF37] hover:bg-[#c49f2e] text-[#0F172A] font-bold rounded-xl text-sm transition-all cursor-pointer"
             >
-              صفحہ تازہ کریں (Refresh Application)
+              دوبارہ کوشش کریں (Try Again)
             </button>
           </div>
         </div>

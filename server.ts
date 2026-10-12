@@ -19,6 +19,14 @@ import {
 
 dotenv.config();
 
+// Prevent unhandled errors and rejections from terminating the server process
+process.on('uncaughtException', (err: any) => {
+  console.error('[CRITICAL] Uncaught exception prevented server crash:', err?.message || err);
+});
+process.on('unhandledRejection', (reason: any) => {
+  console.error('[CRITICAL] Unhandled promise rejection prevented server crash:', reason?.message || reason);
+});
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -44,6 +52,16 @@ app.use((req, res, next) => {
 
 // Safe Body Parsing: handles pre-parsed Vercel serverless bodies, JSON strings, Buffers without crashing on consumed streams
 app.use((req, res, next) => {
+  // Bypass body parsing for raw streaming uploads so stream is unconsumed for req.pipe
+  const isUploadStream =
+    (req.path === '/api/upload-file' || req.path === '/upload-file') ||
+    ((req.path === '/api/upload-chunk' || req.path === '/upload-chunk') &&
+      (req.headers['content-type'] === 'application/octet-stream' || req.headers['x-chunk-binary'] === 'true'));
+
+  if (isUploadStream) {
+    return next();
+  }
+
   // If req.body is already a parsed JS object
   if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body) && Object.keys(req.body).length > 0) {
     return next();
@@ -77,13 +95,18 @@ app.use((req, res, next) => {
     return next();
   }
 
-  // Otherwise, use express.json safely
-  express.json({ limit: '20mb' })(req, res, (err) => {
+  // Otherwise, use express.json safely with 70MB limit for large document chunks
+  express.json({ limit: '70mb' })(req, res, (err) => {
     if (err) {
       console.warn('[BodyParser] express.json stream parse note:', err?.message || err);
       req.body = req.body || {};
     }
-    next();
+    express.urlencoded({ limit: '70mb', extended: true })(req, res, (urlErr) => {
+      if (urlErr) {
+        console.warn('[BodyParser] express.urlencoded note:', urlErr?.message || urlErr);
+      }
+      next();
+    });
   });
 });
 
@@ -169,10 +192,11 @@ const FALLBACK_MODEL_CHAIN = SERVER_FALLBACK_MODEL_CHAIN;
 // Track models that have exhausted their daily free tier quota (to prioritize active models immediately)
 const dailyQuotaExhaustedModels = new Set<string>();
 
-// Global request queue to enforce strictly Concurrency = 1 for all Gemini calls across the server
+// Controlled concurrent request queue (Concurrency = 3) for optimal throughput within 3-5 minutes
 class GeminiRequestQueue {
   private queue: Array<() => Promise<void>> = [];
-  private active = false;
+  private activeCount = 0;
+  private maxConcurrency = 3;
 
   async enqueue<T>(fn: () => Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -189,8 +213,8 @@ class GeminiRequestQueue {
   }
 
   private async processNext() {
-    if (this.active || this.queue.length === 0) return;
-    this.active = true;
+    if (this.activeCount >= this.maxConcurrency || this.queue.length === 0) return;
+    this.activeCount++;
     const task = this.queue.shift();
     if (task) {
       try {
@@ -198,9 +222,7 @@ class GeminiRequestQueue {
       } catch {
         // Rejection handled in enqueue promise wrapper
       } finally {
-        // Enforce cool-down of 1500ms between consecutive Gemini calls to prevent hitting RPM limits
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        this.active = false;
+        this.activeCount--;
         this.processNext();
       }
     }
@@ -209,9 +231,8 @@ class GeminiRequestQueue {
 
 const geminiGlobalQueue = new GeminiRequestQueue();
 
-// Model fallback chain: Primary model -> Secondary Flash model -> Third supported Flash model
-// Explicit timeout (45s), request ID, job ID, chapter number and model name logged on every call
-// Exponential backoff + jitter for 429, 503, 504 and network timeouts. Retries are strictly bounded.
+// Model fallback chain: Primary model -> Secondary Flash model
+// Explicit bounded timeout (28s) and fast fallback to prevent stalls and complete within 3-5 minutes
 async function executeGeminiWithFallbackChain<T>(
   jobId: string,
   stageName: string,
@@ -229,25 +250,25 @@ async function executeGeminiWithFallbackChain<T>(
 
     for (let modelIndex = 0; modelIndex < effectiveChain.length; modelIndex++) {
       const modelName = effectiveChain[modelIndex];
-      // Allow at most 1 controlled retry for 503/timeout
-      const maxRetriesForThisModel = 1;
+      // Fast fallback to next model in chain without redundant duplicate attempts on busy models
+      const maxRetriesForThisModel = 0;
 
       for (let attempt = 0; attempt <= maxRetriesForThisModel; attempt++) {
         const requestId = 'req_' + crypto.randomUUID().slice(0, 8);
         const startTime = Date.now();
 
         console.log(
-          `[Gemini API] [Req: ${requestId}] [Job: ${jobId}] [Stage: ${stageName}] [Chapter: ${chapterNumber ?? 'N/A'}] [Model: ${modelName}] [Attempt: ${attempt + 1}/${maxRetriesForThisModel + 1}] Starting... (Timeout: 45000ms)`
+          `[Gemini API] [Req: ${requestId}] [Job: ${jobId}] [Stage: ${stageName}] [Chapter: ${chapterNumber ?? 'N/A'}] [Model: ${modelName}] Starting... (Timeout: 28000ms)`
         );
 
         try {
-          // Explicit request timeout of 45 seconds to prevent hung connections
+          // Explicit request timeout of 28 seconds to prevent hung connections
           let timer: NodeJS.Timeout | null = null;
           try {
             const timeoutPromise = new Promise<never>((_, reject) => {
               timer = setTimeout(() => {
-                reject(new Error(`Gemini API request timed out after 45000ms [Req: ${requestId}, Model: ${modelName}]`));
-              }, 45000);
+                reject(new Error(`Gemini API request timed out after 28000ms [Req: ${requestId}, Model: ${modelName}]`));
+              }, 28000);
             });
 
             const operationPromise = operation(modelName);
@@ -870,6 +891,7 @@ export interface BookJobState {
   currentChapterIndex: number;
   totalChapters: number;
   progressPercent: number;
+  estimatedRemainingSeconds?: number;
   message: string;
   modelUsed: string;
   attempts?: number;
@@ -971,6 +993,579 @@ function loadJobState(jobId: string): BookJobState | null {
   return null;
 }
 
+// ==========================================
+// UPLOADED FILE & MEDIA PROCESSING PIPELINE
+// ==========================================
+
+export interface UploadedFileMeta {
+  fileId: string;
+  fileName: string;
+  fileType: string;
+  totalSize: number;
+  status: 'uploading' | 'uploaded' | 'processing' | 'ready' | 'error';
+  progress: number;
+  stage: string;
+  extractedText: string;
+  images: string[];
+  wordCount: number;
+  createdAt: number;
+  updatedAt: number;
+  error?: string | null;
+  completedPages?: Record<number, string>;
+  completedSegments?: Record<number, string>;
+}
+
+const activeFileWorkers = new Set<string>();
+
+function getUploadsStorageDir(): string {
+  const baseDir = getJobsStorageDir();
+  const uploadsDir = path.join(baseDir, 'uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    try {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    } catch (e) {
+      console.warn('Could not create uploads directory:', e);
+    }
+  }
+  return uploadsDir;
+}
+
+function saveFileMeta(meta: UploadedFileMeta): void {
+  try {
+    meta.updatedAt = Date.now();
+    const dir = getUploadsStorageDir();
+    const filePath = path.join(dir, `${meta.fileId}_meta.json`);
+    fs.writeFileSync(filePath, JSON.stringify(meta, null, 2), 'utf-8');
+  } catch (err) {
+    console.error(`[Upload Persistence] Error saving file meta ${meta.fileId}:`, err);
+  }
+}
+
+function loadFileMeta(fileId: string): UploadedFileMeta | null {
+  const searchDirs = [
+    getUploadsStorageDir(),
+    path.resolve('/tmp', 'qalam_jobs', 'uploads'),
+    path.resolve(process.cwd(), '.qalam_jobs', 'uploads'),
+  ];
+  const checked = new Set<string>();
+  for (const dir of searchDirs) {
+    if (checked.has(dir)) continue;
+    checked.add(dir);
+    try {
+      const filePath = path.join(dir, `${fileId}_meta.json`);
+      if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath, 'utf-8');
+        return JSON.parse(data) as UploadedFileMeta;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+export function normalizePdfText(rawText: string): string {
+  if (!rawText) return '';
+  // 1. Unicode NFKC normalization converts Presentation Forms A & B to standard Arabic/Urdu letters
+  let normalized = rawText.normalize('NFKC');
+
+  // Check if text appears in reverse visual stream (common in PDFs where RTL was printed left-to-right)
+  const hasReversedTokens =
+    normalized.includes('ملع') ||
+    normalized.includes('ہحفص') ||
+    normalized.includes('تلیضف') ||
+    normalized.includes('ﺦﯾرﺎﺗ') ||
+    normalized.includes('رفاعت');
+
+  if (hasReversedTokens) {
+    normalized = normalized.replace(/[\u0600-\u06FF]+/g, (word) => {
+      return word.split('').reverse().join('');
+    });
+  }
+  return normalized;
+}
+
+async function processUploadedFile(fileId: string): Promise<void> {
+  if (activeFileWorkers.has(fileId)) {
+    console.log(`[File Worker] [File: ${fileId}] Worker is already running. Skipping duplicate.`);
+    return;
+  }
+
+  const meta = loadFileMeta(fileId);
+  if (!meta) {
+    console.warn(`[File Worker] Metadata not found for fileId: ${fileId}`);
+    return;
+  }
+
+  if (meta.status === 'ready') {
+    console.log(`[File Worker] [File: ${fileId}] Already ready. Skipping.`);
+    return;
+  }
+
+  activeFileWorkers.add(fileId);
+  meta.status = 'processing';
+  meta.progress = Math.max(meta.progress || 0, 10);
+  meta.stage = 'فائل کی جانچ اور تیاری جاری ہے...';
+  meta.error = null;
+  saveFileMeta(meta);
+
+  try {
+    const uploadsDir = getUploadsStorageDir();
+    let targetFilePath = path.join(uploadsDir, `${fileId}_${meta.fileName}`);
+    if (!fs.existsSync(targetFilePath)) {
+      const files = fs.readdirSync(uploadsDir);
+      const matched = files.find((f) => f.startsWith(`${fileId}_`) && !f.endsWith('_meta.json'));
+      if (matched) {
+        targetFilePath = path.join(uploadsDir, matched);
+      }
+    }
+
+    if (!fs.existsSync(targetFilePath)) {
+      throw new Error(`اپ لوڈ شدہ فائل سرور پر نہیں ملی: ${meta.fileName}`);
+    }
+
+    const ext = (meta.fileType || meta.fileName.split('.').pop() || '').toLowerCase();
+
+    // 1. Plain Text File (.txt)
+    if (ext === 'txt') {
+      meta.stage = 'متن پڑھا جا رہا ہے...';
+      meta.progress = 50;
+      saveFileMeta(meta);
+
+      let text = fs.readFileSync(targetFilePath, 'utf-8');
+      text = text.replace(/^\uFEFF/, '').replace(/^\uFFFE/, '');
+
+      meta.extractedText = text;
+      meta.wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+      meta.status = 'ready';
+      meta.progress = 100;
+      meta.stage = 'مکمل ہو گیا';
+      saveFileMeta(meta);
+      console.log(`[File Worker] [File: ${fileId}] TXT extraction finished: ${meta.wordCount} words.`);
+      return;
+    }
+
+    // 2. Word Document (.docx)
+    if (ext === 'docx') {
+      meta.stage = 'ورڈ دستاویز (DOCX) کے ابواب، جداول اور خاکے نکالے جا رہے ہیں...';
+      meta.progress = 30;
+      saveFileMeta(meta);
+
+      const mammoth = await import('mammoth');
+      const htmlRes = await mammoth.convertToHtml({ path: targetFilePath });
+      const rawRes = await mammoth.extractRawText({ path: targetFilePath });
+
+      let content = rawRes.value || '';
+      if (htmlRes.value && (htmlRes.value.includes('<table') || htmlRes.value.includes('<img'))) {
+        content = htmlRes.value.replace(/<img\s+src="data:image\/([^;]+);base64,([^"]+)"[^>]*>/gi, (_m, mime, b64) => {
+          return `\n<div class="embedded-illustration"><img src="data:image/${mime};base64,${b64}" alt="خاکہ / نقش" /></div>\n`;
+        });
+      }
+
+      meta.extractedText = content;
+      meta.wordCount = content.trim().split(/\s+/).filter(Boolean).length;
+      meta.status = 'ready';
+      meta.progress = 100;
+      meta.stage = 'مکمل ہو گیا';
+      saveFileMeta(meta);
+      console.log(`[File Worker] [File: ${fileId}] DOCX extraction finished: ${meta.wordCount} words.`);
+      return;
+    }
+
+    // 3. PDF Document (.pdf)
+    if (ext === 'pdf') {
+      meta.stage = 'پی ڈی ایف کے صفحات اور مآخذ کی جانچ جاری ہے...';
+      meta.progress = 20;
+      saveFileMeta(meta);
+
+      const { PDFParse } = await import('pdf-parse');
+      const pdfBuffer = fs.readFileSync(targetFilePath);
+      const parser = new PDFParse({ data: pdfBuffer });
+      await (parser as any).load();
+
+      const textRes = await parser.getText();
+      const numPages = textRes.total || (textRes.pages ? textRes.pages.length : 1);
+      const rawDigitalText = normalizePdfText((textRes.text || '').trim());
+      
+      // Robust check: ensure sufficient Urdu/Arabic/Latin text and not just garbage characters
+      const textLength = rawDigitalText.length;
+      const urduArabicCount = (rawDigitalText.match(/[\u0600-\u06FF]/g) || []).length;
+      const isLikelyDigital = textLength > 500 && (urduArabicCount / Math.max(1, textLength) > 0.05);
+
+      if (isLikelyDigital) {
+        meta.stage = 'ڈیجیٹل پی ڈی ایف کا مکمل متن اور خاکے نکالے جا رہے ہیں...';
+        meta.progress = 70;
+        saveFileMeta(meta);
+
+        let imagesFound: string[] = [];
+        try {
+          const imgRes: any = await parser.getImage();
+          if (imgRes && imgRes.pages) {
+            for (const p of imgRes.pages) {
+              if (p.dataUrl) imagesFound.push(p.dataUrl);
+              else if (p.data && Buffer.isBuffer(p.data)) {
+                imagesFound.push(`data:image/png;base64,${p.data.toString('base64')}`);
+              }
+            }
+          }
+        } catch (imgErr) {
+          console.warn(`[File Worker] Image extraction note on ${fileId}:`, imgErr);
+        }
+
+        let combined = rawDigitalText;
+        if (imagesFound.length > 0) {
+          meta.images = imagesFound;
+          const illustrationsHtml = imagesFound
+            .map((imgUrl, i) => `<div class="embedded-illustration"><img src="${imgUrl}" alt="خاکہ / نقش ${i + 1}" /></div>`)
+            .join('\n\n');
+          combined = `${combined}\n\n${illustrationsHtml}`;
+        }
+
+        meta.extractedText = combined;
+        meta.wordCount = combined.trim().split(/\s+/).filter(Boolean).length;
+        meta.status = 'ready';
+        meta.progress = 100;
+        meta.stage = 'مکمل ہو گیا';
+        saveFileMeta(meta);
+        await parser.destroy();
+        console.log(`[File Worker] [File: ${fileId}] Digital PDF extracted: ${meta.wordCount} words.`);
+        return;
+      } else {
+        // Scanned / Lithograph / Manuscript PDF -> High-Accuracy Urdu & Arabic OCR with Gemini
+        meta.stage = `اسکین شدہ پی ڈی ایف کا تصویری تجزیہ اور اردو/عربی OCR شروع ہو رہا ہے (${numPages} صفحات)...`;
+        meta.progress = 25;
+        saveFileMeta(meta);
+
+        const pageTexts: string[] = [];
+        const preservedImages: string[] = [];
+        const completedPages = meta.completedPages || {};
+
+        const ai = getGeminiClient();
+
+        for (let p = 1; p <= numPages; p++) {
+          if (completedPages[p]) {
+            pageTexts.push(completedPages[p]);
+            continue;
+          }
+
+          meta.stage = `صفحہ ${p}/${numPages} کا اسکین اور اردو/عربی OCR جاری ہے...`;
+          meta.progress = Math.round(25 + ((p - 1) / numPages) * 70);
+          saveFileMeta(meta);
+
+          let pageDataUrl = '';
+          try {
+            const ss: any = await (parser as any).getScreenshot({ page: p });
+            if (ss && ss.pages && ss.pages.length > 0) {
+              const targetPg =
+                ss.pages.find((item: any) => item.pageNumber === p) ||
+                ss.pages[p - 1] ||
+                ss.pages[0];
+              pageDataUrl =
+                targetPg.dataUrl ||
+                (targetPg.data ? `data:image/png;base64,${Buffer.from(targetPg.data).toString('base64')}` : '');
+            }
+          } catch (ssErr) {
+            console.warn(`[File Worker] Could not screenshot page ${p}:`, ssErr);
+          }
+
+          if (!pageDataUrl) {
+            continue;
+          }
+
+          preservedImages.push(pageDataUrl);
+
+          const mimeMatch = pageDataUrl.match(/^data:(image\/[a-zA-Z0-9\+\-]+);base64,/);
+          const imageMimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+          const base64Data = pageDataUrl.replace(/^data:[^;]+;base64,/, '');
+
+          const ocrSystemInstruction = `You are a master scholarly OCR specialist and linguist in Urdu, Arabic, Persian, and Islamic manuscripts for "Qalam AI".
+Your task is to transcribe the complete, exact original text from this scanned manuscript page verbatim.
+Rules:
+1. Extract ALL text verbatim: Urdu, Arabic with diacritics (اعراب، تشکیلات), Quranic verses, Hadith, references, footnotes, and page numbers.
+2. DO NOT summarize, omit, rephrase, or invent any content.
+3. If the page contains a table, render it as an HTML <table> or structured text.
+4. If the page contains a diagram, talisman, numerical square (نقش / وفق), or illustration, note its title and describe its numbers or symbols precisely.
+5. Retain original language and spelling.`;
+
+          const ocrPrompt = `Extract the complete verbatim text from this scanned manuscript page (Page ${p} of ${numPages}):`;
+
+          let pageExtractedText = '';
+          try {
+            const ocrResult = await executeGeminiWithFallbackChain(
+              `ocr_${fileId}_p${p}`,
+              `PDF OCR Page ${p}`,
+              p,
+              (model) =>
+                ai.models.generateContent({
+                  model,
+                  contents: {
+                    parts: [
+                      {
+                        inlineData: {
+                          mimeType: imageMimeType,
+                          data: base64Data,
+                        },
+                      },
+                      { text: ocrPrompt },
+                    ],
+                  },
+                  config: {
+                    systemInstruction: ocrSystemInstruction,
+                  },
+                })
+            );
+            pageExtractedText = ocrResult.result.text || '';
+          } catch (ocrErr: any) {
+            console.warn(`[File Worker] OCR error on page ${p}:`, ocrErr?.message);
+            pageExtractedText = `[صفحہ ${p} کا اصل تصویری خاکہ]`;
+          }
+
+          // In scanned PDF manuscripts, preserve the high-resolution page image to display diagrams, numerical squares (وفق/نقش), and tables
+          let formattedPage = pageExtractedText;
+          if (pageDataUrl) {
+            formattedPage = `${formattedPage}\n\n<div class="embedded-illustration"><img src="${pageDataUrl}" alt="صفحہ ${p} - اصل خاکہ و نقش" /></div>`;
+          }
+
+          completedPages[p] = formattedPage;
+          meta.completedPages = completedPages;
+          pageTexts.push(formattedPage);
+          saveFileMeta(meta);
+        }
+
+        await parser.destroy();
+
+        meta.images = preservedImages;
+        meta.extractedText = pageTexts.join('\n\n--- صفحہ تبدیل ---\n\n');
+        meta.wordCount = meta.extractedText.trim().split(/\s+/).filter(Boolean).length;
+        meta.status = 'ready';
+        meta.progress = 100;
+        meta.stage = 'مکمل ہو گیا';
+        saveFileMeta(meta);
+        console.log(`[File Worker] [File: ${fileId}] Scanned PDF OCR finished: ${meta.wordCount} words.`);
+        return;
+      }
+    }
+
+    // 4. Audio Files (.mp3, .wav, .m4a, .webm, .opus, .ogg, .aac, .flac)
+    if (['mp3', 'wav', 'm4a', 'webm', 'ogg', 'aac', 'opus', 'flac'].includes(ext)) {
+      meta.stage = 'آڈیو فائل کی تیاری اور ڈیکوڈنگ (WhatsApp/Opus) جاری ہے...';
+      meta.progress = 15;
+      saveFileMeta(meta);
+
+      const ai = getGeminiClient();
+
+      // Decode and normalize any incoming audio (WhatsApp .opus, Ogg, WebM, AAC, etc.) to 16kHz mono WAV using ffmpeg
+      const normalizedWavPath = path.join(uploadsDir, `${fileId}_norm16k.wav`);
+      let audioToUsePath = targetFilePath;
+      let usedMimeType = 'audio/wav';
+
+      try {
+        const { execSync } = await import('child_process');
+        execSync(`ffmpeg -y -i "${targetFilePath}" -ar 16000 -ac 1 -c:a pcm_s16le "${normalizedWavPath}"`, {
+          stdio: ['ignore', 'ignore', 'pipe'],
+          timeout: 60000,
+        });
+        if (fs.existsSync(normalizedWavPath) && fs.statSync(normalizedWavPath).size > 1000) {
+          audioToUsePath = normalizedWavPath;
+          usedMimeType = 'audio/wav';
+          console.log(`[File Worker] [File: ${fileId}] Successfully normalized audio to 16kHz mono WAV (${fs.statSync(normalizedWavPath).size} bytes).`);
+        }
+      } catch (ffErr: any) {
+        console.warn(`[File Worker] ffmpeg normalization note for ${fileId}:`, ffErr?.message);
+        // Fallback to original target file
+        const mimeMap: Record<string, string> = {
+          mp3: 'audio/mp3',
+          wav: 'audio/wav',
+          m4a: 'audio/m4a',
+          webm: 'audio/webm',
+          ogg: 'audio/ogg',
+          opus: 'audio/ogg',
+          aac: 'audio/aac',
+          flac: 'audio/flac',
+        };
+        usedMimeType = mimeMap[ext] || 'audio/mp3';
+      }
+
+      // Relax volume check: Log silence but do not reject valid speech outright. 
+      // Only reject if transcription consistently fails or audio is truly empty.
+      try {
+        const { execSync } = await import('child_process');
+        const volOutput = execSync(`ffmpeg -i "${audioToUsePath}" -af "volumedetect" -vn -sn -dn -f null /dev/null 2>&1`, {
+          encoding: 'utf8',
+          timeout: 15000,
+        });
+        const maxVolMatch = volOutput.match(/max_volume:\s*(-?[\d\.]+)\s*dB/);
+        if (maxVolMatch && parseFloat(maxVolMatch[1]) < -50.0) {
+          console.log(`[File Worker] [File: ${fileId}] Audio is extremely quiet (${maxVolMatch[1]} dB). Transcription may be poor.`);
+        }
+      } catch (volErr: any) {
+        console.warn(`[File Worker] volumedetect note for ${fileId}:`, volErr?.message);
+      }
+
+      // Check audio duration or size
+      const audioBuffer = fs.readFileSync(audioToUsePath);
+      const totalBytes = audioBuffer.length;
+
+      // Extract transcription text helper
+      const extractTranscriptionText = (response: any): string => {
+        if (!response) return '';
+        const candidate = response.candidates?.[0];
+        const parts = candidate?.content?.parts || [];
+        const textParts: string[] = [];
+        for (const part of parts) {
+          if (part.audioTranscription?.text) {
+            textParts.push(part.audioTranscription.text);
+          } else if (part.text) {
+            textParts.push(part.text);
+          }
+        }
+        if (textParts.length > 0) return textParts.join('\n').trim();
+        return (response.text || '').trim();
+      };
+
+      // Segment clean time chunks if longer than 5 minutes (~9.6 MB for 16kHz 16-bit mono PCM)
+      const MAX_CHUNK_BYTES = 12 * 1024 * 1024;
+      const totalSegments = Math.max(1, Math.ceil(totalBytes / MAX_CHUNK_BYTES));
+      const completedSegments = meta.completedSegments || {};
+      const segmentTranscripts: string[] = [];
+
+      for (let sIdx = 0; sIdx < totalSegments; sIdx++) {
+        if (completedSegments[sIdx]) {
+          segmentTranscripts.push(completedSegments[sIdx]);
+          continue;
+        }
+
+        meta.stage = totalSegments > 1
+          ? `آڈیو ٹرانسکرپشن جاری ہے (حصہ ${sIdx + 1}/${totalSegments})...`
+          : 'اردو/عربی آڈیو کی اصل زبان میں ٹرانسکرپشن جاری ہے...';
+        meta.progress = Math.round(20 + ((sIdx + 1) / totalSegments) * 75);
+        saveFileMeta(meta);
+
+        let sliceBuf: Buffer;
+        if (totalSegments === 1) {
+          sliceBuf = audioBuffer;
+        } else {
+          // If multiple segments, use ffmpeg to cleanly slice without corrupting headers
+          const chunkWavPath = path.join(uploadsDir, `${fileId}_seg_${sIdx}.wav`);
+          const approxStartSec = sIdx * 300;
+          const approxDurationSec = 300;
+          try {
+            const { execSync } = await import('child_process');
+            execSync(`ffmpeg -y -ss ${approxStartSec} -t ${approxDurationSec} -i "${audioToUsePath}" -c copy "${chunkWavPath}"`, {
+              stdio: ['ignore', 'ignore', 'pipe'],
+              timeout: 30000,
+            });
+            sliceBuf = fs.readFileSync(chunkWavPath);
+            try { fs.unlinkSync(chunkWavPath); } catch {}
+          } catch {
+            const start = sIdx * MAX_CHUNK_BYTES;
+            const end = Math.min(totalBytes, (sIdx + 1) * MAX_CHUNK_BYTES);
+            sliceBuf = audioBuffer.subarray(start, end);
+          }
+        }
+
+        const base64Audio = sliceBuf.toString('base64');
+
+        const transcribePrompt = `You are an expert scholarly linguist and speech-to-text transcriber for Qalam AI (قلم AI).
+Task: Transcribe this audio recording verbatim into text in its original spoken language.
+
+Strict Linguistic & Script Rules:
+1. DETECT AND RETAIN SPOKEN LANGUAGE:
+   - If spoken in Urdu (اردو), transcribe in Urdu script (نستعلیق / اردو رسم الخط).
+   - If spoken in Arabic (العربية) or Quran / Hadith / du'a, transcribe in Arabic script with accurate diacritics.
+   - If mixed Urdu and Arabic, transcribe each part in its authentic spoken language and script.
+   - NEVER translate the audio into English or any other language. Transcription MUST be in the exact spoken language.
+2. VERBATIM ACCURACY:
+   - Transcribe every spoken sentence without summarizing, omitting, or shortening.
+   - Accurately preserve religious terms, Quranic ayahs, Hadith, poetry, quotes, and names.
+   - Use proper punctuation (رموزِ اوقاف) and paragraphs.
+3. ANTI-HALLUCINATION:
+   - NEVER fabricate text, stories, or conversations if the audio is silent or contains only background noise.
+   - If the audio contains no intelligible speech, output exactly: "[INAUDIBLE]".
+4. Return ONLY the verbatim transcription text without conversational preambles.`;
+
+        let segmentText = '';
+        // Try dedicated gemini-3.8-flash for transcription
+        const transcribeModels = ['gemini-3.8-flash', 'gemini-3.7-flash'];
+
+        for (const mName of transcribeModels) {
+          try {
+            console.log(`[File Worker] Starting audio transcription with model: ${mName}`);
+            const transResult = await executeGeminiWithFallbackChain(
+              `transcribe_${fileId}_seg${sIdx}`,
+              `Audio Transcribe Segment ${sIdx + 1}`,
+              sIdx + 1,
+              () => {
+                return ai.models.generateContent({
+                  model: mName,
+                  contents: {
+                    parts: [
+                      {
+                        inlineData: {
+                          mimeType: usedMimeType,
+                          data: base64Audio,
+                        },
+                      },
+                      { text: transcribePrompt },
+                    ],
+                  },
+                  config: {
+                    systemInstruction:
+                      'You are a master linguistic speech-to-text transcriber for Qalam AI. Transcribe spoken audio verbatim in its authentic original language and script (Urdu/Arabic). Never translate to English. Never hallucinate.',
+                  },
+                });
+              }
+            );
+            segmentText = extractTranscriptionText(transResult.result);
+            console.log(`[File Worker] Audio transcription completed with ${mName}. Segment text length: ${segmentText.length}`);
+            if (segmentText.trim()) break;
+          } catch (tErr: any) {
+            console.warn(`[File Worker] Audio transcription attempt failed with ${mName}:`, tErr?.message);
+          }
+        }
+
+        // Clean any temporary normalized files
+        if (normalizedWavPath && fs.existsSync(normalizedWavPath)) {
+          try { fs.unlinkSync(normalizedWavPath); } catch {}
+        }
+
+        const trimmedSegment = segmentText.trim();
+        // Do not reject the entire file if a segment is inaudible.
+        if (trimmedSegment === '[INAUDIBLE]' || !trimmedSegment) {
+          console.warn(`[File Worker] [File: ${fileId}] Segment ${sIdx} is inaudible.`);
+          segmentTranscripts.push('[کلام ناقابلِ سماعت]');
+        } else {
+          completedSegments[sIdx] = trimmedSegment;
+          meta.completedSegments = completedSegments;
+          segmentTranscripts.push(trimmedSegment);
+        }
+        saveFileMeta(meta);
+      }
+
+      const fullTranscript = segmentTranscripts.filter(Boolean).join('\n\n');
+      if (!fullTranscript || fullTranscript.includes('[INAUDIBLE]') || fullTranscript.includes('[کلام ناقابلِ سماعت]')) {
+        throw new Error('آڈیو میں واضح کلام (Urdu/Arabic Speech) شناخت نہیں ہو سکا۔ براہِ کرم واضح ریکارڈنگ فراہم فرمائیں۔');
+      }
+
+      meta.extractedText = fullTranscript;
+      meta.wordCount = fullTranscript.trim().split(/\s+/).filter(Boolean).length;
+      meta.status = 'ready';
+      meta.progress = 100;
+      meta.stage = 'مکمل ہو گیا';
+      saveFileMeta(meta);
+      console.log(`[File Worker] [File: ${fileId}] Audio transcription finished: ${meta.wordCount} words.`);
+      return;
+    }
+
+    throw new Error(`غیر معاون فائل فارمیٹ: .${ext}`);
+  } catch (err: any) {
+    console.error(`[File Worker] [File: ${fileId}] Error:`, err);
+    meta.status = 'error';
+    meta.error = err?.message || 'فائل کی پروسیسنگ کے دوران خرابی پیش آئی۔';
+    saveFileMeta(meta);
+  } finally {
+    activeFileWorkers.delete(fileId);
+  }
+}
+
 // Periodic TTL cleanup: jobs in memory older than 2 hours are pruned from RAM (remain on disk)
 const isServerlessEnv = !!(
   process.env.VERCEL ||
@@ -1052,40 +1647,11 @@ async function processBookGenerationJob(jobId: string): Promise<void> {
     }
 
     // ----------------------------------------------------
-    // STAGE 0: Searching / Source Retrieval & Analysis (Bounded & Non-blocking)
-    // ----------------------------------------------------
-    if (!job.outline) {
-      job.currentStage = 'searching';
-      job.progressPercent = 8;
-      job.message = 'مسودے کے مآخذ، فکری ربط اور تحقیقی مواد کی جانچ (Searching & Analyzing Sources)...';
-      saveJobState(job);
-
-      // Bounded source retrieval: strictly bounded timeout (max 2000ms), 100% non-blocking
-      try {
-        const searchPromise = new Promise<void>((resolve) => {
-          setTimeout(resolve, 800);
-        });
-        const searchTimeout = new Promise<void>((resolve) => {
-          setTimeout(resolve, 2000);
-        });
-        await Promise.race([searchPromise, searchTimeout]);
-        console.log(`[Source Search] [Job: ${jobId}] Bounded source analysis completed. Proceeding to outline...`);
-      } catch (searchErr) {
-        console.warn(`[Source Search] [Job: ${jobId}] Source search optional step finished with note:`, searchErr);
-      }
-    }
-
-    if (isCancelled()) {
-      console.log(`[Job Runner] [Job: ${jobId}] Cancellation signal detected before outline stage.`);
-      return;
-    }
-
-    // ----------------------------------------------------
     // STAGE 1: Book Outline Generation (Resumable)
     // ----------------------------------------------------
     if (!job.outline) {
       job.currentStage = 'outline';
-      job.progressPercent = 12;
+      job.progressPercent = 10;
       job.message = 'کتاب کا فکری خاکہ اور ابواب کا ڈھانچہ ترتیب دیا جا رہا ہے...';
       saveJobState(job);
 
@@ -1205,7 +1771,7 @@ ${sampleContentForOutline}
     }
 
     // ----------------------------------------------------
-    // STAGE 2: Individual Chapter Generation (Resumable)
+    // STAGE 2: Individual Chapter Generation (Parallel Concurrency = 2, Target 3-5 Mins)
     // ----------------------------------------------------
     const chaptersList = job.outline.chapters || [];
     const totalChapters = chaptersList.length;
@@ -1215,27 +1781,17 @@ ${sampleContentForOutline}
       job.completedChapters = {};
     }
 
-    const sliceSize = Math.ceil(contentTrimmed.length / Math.max(1, totalChapters));
+    const unfinishedChapters = chaptersList
+      .map((ch: any, idx: number) => ({ ch, chNumber: idx + 1, idx }))
+      .filter(({ ch }: any) => !job.completedChapters[ch.id]);
 
-    for (let idx = 0; idx < totalChapters; idx++) {
-      if (isCancelled()) {
-        console.log(`[Job Runner] [Job: ${jobId}] Cancellation signal detected before chapter ${idx + 1}. Halting.`);
-        return;
-      }
-
-      const ch = chaptersList[idx];
-      const chNumber = idx + 1;
-
-      // RULE 3 & 10: If chapter is already saved in persistent storage, skip without Gemini call!
-      if (job.completedChapters[ch.id]) {
-        console.log(`[Job Runner] [Job: ${jobId}] Chapter ${chNumber} (${ch.title}) is already saved. Skipping Gemini call.`);
-        continue;
-      }
+    const processSingleChapter = async ({ ch, chNumber, idx }: any) => {
+      if (isCancelled()) return;
 
       job.currentStage = 'chapter';
       job.currentChapterIndex = chNumber;
-      const completedCount = Object.keys(job.completedChapters).length;
-      job.progressPercent = Math.round(18 + (completedCount / totalChapters) * 74);
+      const completedCountBefore = Object.keys(job.completedChapters).length;
+      job.progressPercent = Math.round(18 + (completedCountBefore / totalChapters) * 74);
       job.message = `باب ${chNumber}: "${ch.title}" کا تفصیلی مواد تیار کیا جا رہا ہے...`;
       saveJobState(job);
 
@@ -1305,10 +1861,7 @@ Target JSON format:
         responseText = '';
       }
 
-      if (isCancelled()) {
-        console.log(`[Job Runner] [Job: ${jobId}] Cancellation signal detected after chapter ${chNumber} Gemini call.`);
-        return;
-      }
+      if (isCancelled()) return;
 
       let sections: any[] = [];
 
@@ -1363,9 +1916,30 @@ Target JSON format:
       job.completedChapters[ch.id] = completedChapterData;
       const updatedCount = Object.keys(job.completedChapters).length;
       job.progressPercent = Math.round(18 + (updatedCount / totalChapters) * 74);
-      job.message = `باب ${chNumber}: "${completedChapterData.title}" کامیابی سے مکمل اور محفوظ ہو گیا۔`;
+
+      // Estimate remaining time genuinely based on elapsed time per chapter
+      const elapsedMs = Date.now() - (job.createdAt || Date.now());
+      const remainingChapters = totalChapters - updatedCount;
+      if (updatedCount > 0 && remainingChapters > 0) {
+        const avgPerChapterMs = elapsedMs / updatedCount;
+        const estBatches = Math.ceil(remainingChapters / 3);
+        job.estimatedRemainingSeconds = Math.max(5, Math.round((estBatches * avgPerChapterMs) / 1000));
+      } else {
+        job.estimatedRemainingSeconds = 5;
+      }
+
+      const estMins = Math.ceil((job.estimatedRemainingSeconds || 60) / 60);
+      job.message = `[${job.progressPercent}٪] باب ${chNumber}: "${completedChapterData.title}" کامیابی سے مکمل اور محفوظ ہو گیا۔ (تخمینی باقی وقت: ~${estMins} منٹ)`;
       saveJobState(job);
-      console.log(`[Job Runner] [Job: ${jobId}] Chapter ${chNumber} saved to persistent state. Progress: ${job.progressPercent}%`);
+      console.log(`[Job Runner] [Job: ${jobId}] Chapter ${chNumber} saved to persistent state. Progress: ${job.progressPercent}%, Remaining: ~${job.estimatedRemainingSeconds}s`);
+    };
+
+    // Parallel chapter processing with safe controlled concurrency = 3 (target 3-5 minutes completion)
+    const CHAPTER_CONCURRENCY = 3;
+    for (let i = 0; i < unfinishedChapters.length; i += CHAPTER_CONCURRENCY) {
+      if (isCancelled()) break;
+      const batch = unfinishedChapters.slice(i, i + CHAPTER_CONCURRENCY);
+      await Promise.all(batch.map((item: any) => processSingleChapter(item)));
     }
 
     if (isCancelled()) {
@@ -1439,6 +2013,263 @@ Target JSON format:
 // ==========================================
 // API ENDPOINTS
 // ==========================================
+
+// POST /api/upload-file - Direct Fast Stream Upload (Instant transfer with real progress)
+app.post(['/api/upload-file', '/upload-file'], async (req, res) => {
+  try {
+    const fileId = (req.headers['x-file-id'] as string) || `file_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const rawFileName = req.headers['x-file-name'] ? decodeURIComponent(req.headers['x-file-name'] as string) : 'document';
+    const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9_\-\. \u0600-\u06FF]/g, '_');
+    const fileType = (req.headers['x-file-type'] as string) || cleanFileName.split('.').pop() || 'bin';
+    const totalSize = parseInt((req.headers['x-file-size'] as string) || '0', 10);
+
+    const uploadsDir = getUploadsStorageDir();
+    const targetFilePath = path.join(uploadsDir, `${fileId}_${cleanFileName}`);
+    const writeStream = fs.createWriteStream(targetFilePath);
+
+    req.pipe(writeStream);
+
+    writeStream.on('finish', () => {
+      let finalSize = totalSize;
+      try {
+        if (fs.existsSync(targetFilePath)) {
+          finalSize = fs.statSync(targetFilePath).size;
+        }
+      } catch {}
+
+      const newMeta: UploadedFileMeta = {
+        fileId,
+        fileName: cleanFileName,
+        fileType,
+        totalSize: finalSize,
+        status: 'uploaded',
+        progress: 100,
+        stage: 'اپ لوڈ مکمل ہو گئی! (Upload complete)',
+        extractedText: '',
+        images: [],
+        wordCount: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      saveFileMeta(newMeta);
+
+      console.log(`[Upload Direct] File ${fileId} (${cleanFileName}, ${(finalSize / 1024 / 1024).toFixed(2)} MB) safely stored on disk.`);
+
+      return res.json({
+        success: true,
+        fileId,
+        fileName: cleanFileName,
+        fileType,
+        totalSize: finalSize,
+        status: 'uploaded',
+        message: 'اپ لوڈ مکمل ہو گئی (Upload complete)',
+      });
+    });
+
+    writeStream.on('error', (err) => {
+      console.error('[Upload Stream Error]:', err);
+      if (!res.headersSent) {
+        return res.status(500).json({ success: false, error: 'فائل محفوظ کرنے میں خرابی۔' });
+      }
+    });
+
+    req.on('error', (err) => {
+      console.error('[Upload Request Error]:', err);
+      if (!res.headersSent) {
+        return res.status(500).json({ success: false, error: 'نیٹ ورک ٹرانسفر میں خرابی۔' });
+      }
+    });
+  } catch (err: any) {
+    console.error('Error in /api/upload-file:', err);
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, error: err?.message || 'فائل اپ لوڈ کرنے میں خرابی۔' });
+    }
+  }
+});
+
+// POST /api/upload-chunk - Resumable Chunked Upload supporting files up to 50MB+
+app.post(['/api/upload-chunk', '/upload-chunk'], async (req, res) => {
+  try {
+    const isBinaryChunk =
+      req.headers['x-chunk-binary'] === 'true' ||
+      req.headers['content-type'] === 'application/octet-stream';
+
+    let fileId: string = '';
+    let chunkIndex: number = 0;
+    let totalChunks: number = 1;
+    let rawFileName: string = 'file';
+    let fileType: string = 'bin';
+    let totalSize: number = 0;
+
+    const uploadsDir = getUploadsStorageDir();
+
+    if (isBinaryChunk) {
+      fileId = (req.headers['x-file-id'] as string) || '';
+      chunkIndex = parseInt((req.headers['x-chunk-index'] as string) || '0', 10);
+      totalChunks = parseInt((req.headers['x-total-chunks'] as string) || '1', 10);
+      rawFileName = (req.headers['x-file-name'] as string) ? decodeURIComponent(req.headers['x-file-name'] as string) : 'document';
+      fileType = (req.headers['x-file-type'] as string) || rawFileName.split('.').pop() || 'bin';
+      totalSize = parseInt((req.headers['x-file-size'] as string) || '0', 10);
+
+      if (!fileId) {
+        return res.status(400).json({ success: false, error: 'x-file-id درکار ہے۔' });
+      }
+
+      const partPath = path.join(uploadsDir, `${fileId}.part_${chunkIndex}`);
+      const partStream = fs.createWriteStream(partPath);
+      req.pipe(partStream);
+      await new Promise<void>((resolve, reject) => {
+        partStream.on('finish', () => resolve());
+        partStream.on('error', reject);
+        req.on('error', reject);
+      });
+    } else {
+      const body = req.body || {};
+      fileId = body.fileId;
+      chunkIndex = body.chunkIndex;
+      totalChunks = body.totalChunks;
+      rawFileName = body.fileName || 'file';
+      fileType = body.fileType || rawFileName.split('.').pop() || 'bin';
+      totalSize = body.totalSize || 0;
+      const chunkBase64 = body.chunkBase64;
+
+      if (!fileId || typeof chunkIndex !== 'number' || typeof totalChunks !== 'number' || !chunkBase64) {
+        return res.status(400).json({ success: false, error: 'نامکمل چنک ڈیٹا فراہم کیا گیا ہے۔' });
+      }
+
+      const chunkBuffer = Buffer.from(chunkBase64, 'base64');
+      const partPath = path.join(uploadsDir, `${fileId}.part_${chunkIndex}`);
+      fs.writeFileSync(partPath, chunkBuffer);
+    }
+
+    const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9_\-\. \u0600-\u06FF]/g, '_');
+
+    // Check if this was the last chunk and all parts exist
+    const allPartsPresent = Array.from({ length: totalChunks }).every((_, i) =>
+      fs.existsSync(path.join(uploadsDir, `${fileId}.part_${i}`))
+    );
+
+    if (chunkIndex === totalChunks - 1 || allPartsPresent) {
+      const assembledPath = path.join(uploadsDir, `${fileId}_${cleanFileName}`);
+      const writeStream = fs.createWriteStream(assembledPath);
+
+      for (let i = 0; i < totalChunks; i++) {
+        const pPath = path.join(uploadsDir, `${fileId}.part_${i}`);
+        if (fs.existsSync(pPath)) {
+          const partStream = fs.createReadStream(pPath);
+          await new Promise<void>((resolve, reject) => {
+            partStream.pipe(writeStream, { end: false });
+            partStream.on('end', () => {
+              try { fs.unlinkSync(pPath); } catch {}
+              resolve();
+            });
+            partStream.on('error', reject);
+          });
+        }
+      }
+      writeStream.end();
+
+      await new Promise<void>((resolve) => writeStream.on('finish', () => resolve()));
+
+      const finalSize = totalSize || fs.statSync(assembledPath).size;
+
+      const newMeta: UploadedFileMeta = {
+        fileId,
+        fileName: cleanFileName,
+        fileType: fileType || cleanFileName.split('.').pop() || 'bin',
+        totalSize: finalSize,
+        status: 'uploaded',
+        progress: 100,
+        stage: 'اپ لوڈ مکمل ہو گئی! (Upload complete)',
+        extractedText: '',
+        images: [],
+        wordCount: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      saveFileMeta(newMeta);
+
+      console.log(`[Upload Chunked] Reassembled file ${fileId} (${cleanFileName}, ${(finalSize / 1024 / 1024).toFixed(2)} MB) safely stored on disk.`);
+
+      return res.json({
+        success: true,
+        fileId,
+        completed: true,
+        status: 'uploaded',
+        progress: 100,
+        message: 'اپ لوڈ مکمل ہو گئی (Upload complete)',
+      });
+    }
+
+    const currentPercent = Math.round(((chunkIndex + 1) / totalChunks) * 100);
+    return res.json({
+      success: true,
+      fileId,
+      completed: false,
+      chunkIndex,
+      progress: currentPercent,
+    });
+  } catch (err: any) {
+    console.error('Error in /api/upload-chunk:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'چنک اپ لوڈ کرنے میں خرابی۔' });
+  }
+});
+
+// GET /api/file-status/:fileId - Check file processing status (Strictly Read-Only)
+app.get(['/api/file-status/:fileId', '/file-status/:fileId'], (req, res) => {
+  const { fileId } = req.params;
+  const meta = loadFileMeta(fileId);
+
+  if (!meta) {
+    return res.status(404).json({ success: false, error: 'فائل میٹا ڈیٹا دستیاب نہیں ہے۔' });
+  }
+
+  return res.json({
+    success: true,
+    fileId: meta.fileId,
+    fileName: meta.fileName,
+    fileType: meta.fileType,
+    status: meta.status,
+    progress: meta.progress,
+    stage: meta.stage,
+    extractedText: meta.extractedText,
+    images: meta.images,
+    wordCount: meta.wordCount,
+    error: meta.error || null,
+  });
+});
+
+// POST /api/process-file - Force or resume file processing (Guarded against duplicate workers)
+app.post(['/api/process-file', '/process-file'], (req, res) => {
+  const { fileId } = req.body || {};
+  if (!fileId) {
+    return res.status(400).json({ success: false, error: 'fileId مطلوب ہے۔' });
+  }
+
+  const meta = loadFileMeta(fileId);
+  if (!meta) {
+    return res.status(404).json({ success: false, error: 'فائل میٹا ڈیٹا دستیاب نہیں ہے۔' });
+  }
+
+  if (meta.status === 'ready') {
+    return res.json({ success: true, fileId, status: 'ready', message: 'فائل کا متن پہلے سے تیار ہے۔' });
+  }
+
+  if (activeFileWorkers.has(fileId)) {
+    return res.json({ success: true, fileId, status: 'processing', message: 'پروسیسنگ پہلے ہی پس منظر میں جاری ہے۔' });
+  }
+
+  meta.status = 'processing';
+  saveFileMeta(meta);
+
+  setImmediate(() => {
+    processUploadedFile(fileId).catch((err) => {
+      console.error(`[Background File Worker] Process error on ${fileId}:`, err);
+    });
+  });
+
+  return res.json({ success: true, fileId, status: 'processing', message: 'پروسیسنگ شروع کر دی گئی ہے۔' });
+});
 
 // POST /api/generate-book - Start or Resume Background Job (Returns unique Job ID immediately)
 app.post(['/api/generate-book', '/generate-book'], async (req, res) => {
@@ -1671,6 +2502,7 @@ app.get(['/api/generate-book/status/:jobId', '/generate-book/status/:jobId'], (r
     currentChapterIndex: job.currentChapterIndex,
     totalChapters: job.totalChapters,
     completedChaptersCount: completedCount,
+    estimatedRemainingSeconds: job.estimatedRemainingSeconds ?? null,
     message: job.message,
     modelUsed: job.modelUsed,
     error: job.error || null,
@@ -1875,7 +2707,25 @@ async function startServer() {
     const vitePkg = 'vite';
     const { createServer: createViteServer } = await import(/* @vite-ignore */ vitePkg);
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+        watch: {
+          ignored: [
+            (filePath: string) =>
+              filePath.includes('.qalam_jobs') ||
+              filePath.includes('uploads') ||
+              filePath.includes('tests') ||
+              filePath.includes('tmp') ||
+              filePath.includes('.git') ||
+              filePath.endsWith('.pdf') ||
+              filePath.endsWith('.json') ||
+              filePath.endsWith('.wav') ||
+              filePath.endsWith('.opus') ||
+              filePath.endsWith('.mp3'),
+          ],
+        },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);

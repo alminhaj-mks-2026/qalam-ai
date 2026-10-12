@@ -60,10 +60,16 @@ export interface AttachedFile {
   id: string;
   name: string;
   size: number; // in bytes
-  type: 'pdf' | 'docx' | 'txt' | 'mp3' | 'wav' | 'm4a';
+  type: 'pdf' | 'docx' | 'txt' | 'mp3' | 'wav' | 'm4a' | 'webm' | 'opus' | 'ogg' | 'aac' | 'flac';
   category: 'document' | 'audio';
   uploadDate: string;
   content?: string;
+  status?: 'idle' | 'uploading' | 'uploaded' | 'processing' | 'ready' | 'error';
+  progress?: number;
+  stageText?: string;
+  error?: string;
+  images?: string[];
+  wordCount?: number;
 }
 
 export interface StyleOverrides {
@@ -180,6 +186,7 @@ export interface BookJobStatusResponse {
   currentChapterIndex?: number;
   totalChapters?: number;
   completedChaptersCount?: number;
+  estimatedRemainingSeconds?: number;
   message: string;
   modelUsed?: string;
   error?: string | null;

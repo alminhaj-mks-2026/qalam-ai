@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { TranslationDictionary } from '../i18n/translations';
 import { InputMode, BookGenre, AttachedFile, Taqreez, AUTHOR_ROLE_OPTIONS } from '../types';
 import { SupportedGeminiModel } from '../config/models';
+import { uploadFileDirect, pollFileExtractionUntilReady, uploadFileChunked, uploadFileResilient } from '../services/aiService';
 import {
   FileText,
   Upload,
@@ -134,19 +135,73 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         }
       };
 
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const fileId = Math.random().toString(36).substring(2, 9);
+        const fileName = `وائس ریکارڈنگ (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}).webm`;
         const newFile: AttachedFile = {
-          id: Math.random().toString(36).substring(2, 9),
-          name: `وائس ریکارڈنگ (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}).webm`,
+          id: fileId,
+          name: fileName,
           size: audioBlob.size,
-          type: 'wav',
+          type: 'webm',
           category: 'audio',
           uploadDate: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          status: 'uploading',
+          progress: 0,
+          stageText: 'اپ لوڈ شروع ہو رہا ہے...',
         };
         setAttachedFiles((prev) => [...prev, newFile]);
         // Clean stream tracks
         stream.getTracks().forEach((track) => track.stop());
+
+        try {
+          // Resilient upload: tracks real byte progress and seamlessly processes audio
+          const result = await uploadFileResilient(
+            audioBlob,
+            fileName,
+            'webm',
+            (pct, msg) => {
+              setAttachedFiles((prev) =>
+                prev.map((f) =>
+                  f.id === fileId
+                    ? {
+                        ...f,
+                        status: pct >= 100 ? 'processing' : 'uploading',
+                        progress: pct,
+                        stageText: msg,
+                      }
+                    : f
+                )
+              );
+            }
+          );
+
+          setAttachedFiles((prev) =>
+            prev.map((f) =>
+              f.id === fileId
+                ? {
+                    ...f,
+                    status: 'ready',
+                    progress: 100,
+                    stageText: 'مکمل ہو گیا',
+                    content: result.extractedText,
+                    wordCount: result.wordCount,
+                  }
+                : f
+            )
+          );
+          if (result.extractedText) {
+            setRawText((prev) => (prev ? `${prev}\n\n${result.extractedText}` : result.extractedText));
+          }
+        } catch (err: any) {
+          setAttachedFiles((prev) =>
+            prev.map((f) =>
+              f.id === fileId
+                ? { ...f, status: 'error', error: err?.message || 'آڈیو ٹرانسکرپشن میں خرابی پیش آئی' }
+                : f
+            )
+          );
+        }
       };
 
       recorder.start();
@@ -166,49 +221,84 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, category: 'document' | 'audio') => {
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
+    if (files.length === 0) return;
 
-    files.forEach((file) => {
+    files.forEach(async (file) => {
       const ext = file.name.split('.').pop()?.toLowerCase() || '';
       let type: AttachedFile['type'] = 'txt';
-      if (['pdf', 'docx', 'txt', 'mp3', 'wav', 'm4a'].includes(ext)) {
+      if (['pdf', 'docx', 'txt', 'mp3', 'wav', 'm4a', 'webm', 'opus', 'ogg', 'aac', 'flac'].includes(ext)) {
         type = ext as AttachedFile['type'];
       }
 
-      if (type === 'txt') {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const fileContent = event.target?.result as string;
-          if (fileContent) {
-            setRawText(rawText ? `${rawText}\n\n${fileContent}` : fileContent);
-            setAttachedFiles((prev) => [
-              ...prev,
-              {
-                id: Math.random().toString(36).substring(2, 9),
-                name: file.name,
-                size: file.size,
-                type,
-                category,
-                uploadDate: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                content: fileContent,
-              },
-            ]);
+      const fileId = Math.random().toString(36).substring(2, 9);
+      const newFile: AttachedFile = {
+        id: fileId,
+        name: file.name,
+        size: file.size,
+        type,
+        category,
+        uploadDate: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        status: 'uploading',
+        progress: 0,
+        stageText: 'اپ لوڈ شروع ہو رہا ہے...',
+      };
+      setAttachedFiles((prev) => [...prev, newFile]);
+
+      // Resilient Upload: Automatically chunks files >= 10MB (supporting 50MB+) to prevent HTTP 413,
+      // and runs OCR/transcription reliably.
+      try {
+        const result = await uploadFileResilient(
+          file,
+          file.name,
+          type,
+          (progressPercent, stageMessage) => {
+            setAttachedFiles((prev) =>
+              prev.map((f) =>
+                f.id === fileId
+                  ? {
+                      ...f,
+                      status: progressPercent >= 100 ? 'processing' : 'uploading',
+                      progress: progressPercent,
+                      stageText: stageMessage,
+                    }
+                  : f
+              )
+            );
           }
-        };
-        reader.readAsText(file);
-      } else {
-        setAttachedFiles((prev) => [
-          ...prev,
-          {
-            id: Math.random().toString(36).substring(2, 9),
-            name: file.name,
-            size: file.size,
-            type,
-            category,
-            uploadDate: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          },
-        ]);
+        );
+
+        setAttachedFiles((prev) =>
+          prev.map((f) =>
+            f.id === fileId
+              ? {
+                  ...f,
+                  status: 'ready',
+                  progress: 100,
+                  stageText: 'مکمل ہو گیا',
+                  content: result.extractedText,
+                  images: result.images,
+                  wordCount: result.wordCount,
+                }
+              : f
+          )
+        );
+        if (result.extractedText) {
+          setRawText((prev) => (prev ? `${prev}\n\n${result.extractedText}` : result.extractedText));
+        }
+      } catch (err: any) {
+        setAttachedFiles((prev) =>
+          prev.map((f) =>
+            f.id === fileId
+              ? { ...f, status: 'error', error: err?.message || 'فائل کی پروسیسنگ میں خرابی پیش آئی' }
+              : f
+          )
+        );
       }
     });
+
+    if (e.target) {
+      e.target.value = '';
+    }
   };
 
   const removeFile = (id: string) => {
@@ -601,7 +691,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               type="file"
               ref={audioInputRef}
               onChange={(e) => handleFileUpload(e, 'audio')}
-              accept=".mp3,.wav,.m4a,.webm"
+              accept=".mp3,.wav,.m4a,.webm,.opus,.ogg,.aac,.flac,audio/*"
               multiple
               className="hidden"
             />
@@ -654,7 +744,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
 
                 <div>
                   <h4 className="text-sm font-bold font-urdu text-[#0F172A]">آڈیو فائل اپ لوڈ کریں</h4>
-                  <p className="text-xs font-urdu text-slate-500 mt-1">MP3, WAV, M4A ریکارڈنگ ڈیوائس سے چنیں</p>
+                  <p className="text-xs font-urdu text-slate-500 mt-1">MP3, WAV, M4A, WhatsApp وائس نوٹس (.opus), OGG چنیں</p>
                 </div>
 
                 <div className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#0F172A] text-[#D4AF37] text-xs font-bold font-urdu rounded-lg shadow-2xs">
@@ -676,29 +766,89 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               {attachedFiles.map((file) => (
                 <div
                   key={file.id}
-                  className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg text-xs font-urdu"
+                  className="flex flex-col p-2.5 bg-white border border-slate-200 rounded-lg text-xs font-urdu gap-1.5 shadow-2xs"
                 >
-                  <div className="flex items-center gap-2 overflow-hidden">
-                    {file.category === 'audio' ? (
-                      <Music className="w-4 h-4 text-rose-600 shrink-0" />
-                    ) : (
-                      <FileCode className="w-4 h-4 text-slate-600 shrink-0" />
-                    )}
-                    <span className="font-medium text-slate-800 truncate max-w-[180px]">
-                      {file.name}
-                    </span>
-                    <span className="text-[10px] font-mono text-slate-400 uppercase">
-                      {(file.size / 1024).toFixed(0)}KB
-                    </span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      {file.category === 'audio' ? (
+                        <Music className="w-4 h-4 text-rose-600 shrink-0" />
+                      ) : (
+                        <FileCode className="w-4 h-4 text-slate-600 shrink-0" />
+                      )}
+                      <span className="font-medium text-slate-800 truncate max-w-[170px]" title={file.name}>
+                        {file.name}
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400 uppercase">
+                        {(file.size / 1024).toFixed(0)}KB
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={() => removeFile(file.id)}
+                      className="p-1 text-slate-400 hover:text-red-600 transition-colors cursor-pointer"
+                      title="حذف کریں"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
 
-                  <button
-                    onClick={() => removeFile(file.id)}
-                    className="p-1 text-slate-400 hover:text-red-600 transition-colors cursor-pointer"
-                    title="حذف کریں"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {/* Status Indicator */}
+                  {file.status === 'ready' && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200/60 font-urdu">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 shrink-0" />
+                      <span>متن کامیابی سے نکالا گیا {file.wordCount ? `(${file.wordCount} الفاظ)` : ''}</span>
+                    </div>
+                  )}
+
+                  {file.status === 'uploaded' && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-emerald-800 bg-emerald-50/90 px-2 py-0.5 rounded border border-emerald-300 font-urdu">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 shrink-0" />
+                      <span className="font-bold">اپ لوڈ مکمل ہو گئی! (Upload complete)</span>
+                    </div>
+                  )}
+
+                  {file.status === 'uploading' && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[11px] text-blue-800 bg-blue-50/70 px-2 py-0.5 rounded border border-blue-200 font-urdu">
+                        <span className="flex items-center gap-1.5 truncate">
+                          <Loader2 className="w-3 h-3 animate-spin text-blue-600 shrink-0" />
+                          <span className="truncate">{file.stageText || 'اپ لوڈ جاری ہے...'}</span>
+                        </span>
+                        <span className="font-mono text-[10px] shrink-0 font-bold">{file.progress ?? 0}٪</span>
+                      </div>
+                      <div className="w-full bg-slate-100 rounded-full h-1 overflow-hidden">
+                        <div
+                          className="bg-blue-600 h-1 rounded-full transition-all duration-150"
+                          style={{ width: `${Math.max(2, file.progress ?? 0)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {file.status === 'processing' && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[11px] text-amber-800 bg-amber-50/70 px-2 py-0.5 rounded border border-amber-200 font-urdu">
+                        <span className="flex items-center gap-1.5 truncate">
+                          <Loader2 className="w-3 h-3 animate-spin text-amber-600 shrink-0" />
+                          <span className="truncate">{file.stageText || 'تجزیہ جاری ہے...'}</span>
+                        </span>
+                        <span className="font-mono text-[10px] shrink-0 font-bold">{file.progress ?? 0}٪</span>
+                      </div>
+                      <div className="w-full bg-slate-100 rounded-full h-1 overflow-hidden">
+                        <div
+                          className="bg-amber-500 h-1 rounded-full transition-all duration-300"
+                          style={{ width: `${Math.max(2, file.progress ?? 0)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {file.status === 'error' && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200 font-urdu">
+                      <AlertCircle className="w-3 h-3 text-rose-600 shrink-0" />
+                      <span className="truncate">{file.error || 'خرابی پیش آئی'}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
