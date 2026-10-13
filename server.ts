@@ -4,7 +4,7 @@ import { GoogleGenAI } from '@google/genai';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { DEFAULT_GEMINI_MODEL, SERVER_FALLBACK_MODEL_CHAIN } from './src/config/models';
+import { DEFAULT_GEMINI_MODEL, SERVER_FALLBACK_MODEL_CHAIN } from './src/config/models.js';
 import {
   cleanRawManuscript,
   sanitizeBookHeading,
@@ -15,7 +15,7 @@ import {
   deriveSubstantivePreface,
   deriveSubstantiveConclusion,
   removeDilKiAwazSignatures,
-} from './src/services/manuscriptCleaner';
+} from './src/services/manuscriptCleaner.js';
 
 dotenv.config();
 
